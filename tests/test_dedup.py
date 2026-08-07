@@ -89,10 +89,26 @@ def test_name_groups_excludes_same_isrc(tmp_path):
     assert len(groups) == 0
 
 
-def test_suggest_canonical_prefers_liked_then_date(tmp_path):
+def test_suggest_canonical_prefers_album_then_date(tmp_path):
     store = _make_store(tmp_path)
     cfg = _cfg(tmp_path)
-    assert DedupAnalyzer(cfg, store).suggest_canonical([A, B]) == B
+    assert DedupAnalyzer(cfg, store).suggest_canonical([A, B]) == A
+
+
+def test_suggest_canonical_liked_as_tiebreaker(tmp_path):
+    store = _make_store(tmp_path)
+    store.upsert(
+        "tracks", D, _track(D, "Дубль", liked=True, playlists=["Night"])
+    )
+    store.upsert(
+        "albums", D, _album(D, "Альбом Д", date="2020-01-01", track_ids=[D])
+    )
+    store.upsert("tracks", E, _track(E, "Дубль", isrc="USZZZ0000003"))
+    store.upsert(
+        "albums", E, _album(E, "Альбом Е", date="2020-01-01", track_ids=[E])
+    )
+    cfg = _cfg(tmp_path)
+    assert DedupAnalyzer(cfg, store).suggest_canonical([D, E]) == D
 
 
 def test_write_report(tmp_path):
@@ -103,7 +119,7 @@ def test_write_report(tmp_path):
     md = path.read_text(encoding="utf-8")
     assert "Песня" in md
     assert (path.parent / "duplicates.json").exists()
-    assert analysis["exact_groups"][0]["canonical"] == B
+    assert analysis["exact_groups"][0]["canonical"] == A
 
 
 def test_apply_remaps_deletes_backs_up(tmp_path):
@@ -112,20 +128,19 @@ def test_apply_remaps_deletes_backs_up(tmp_path):
     stats = DedupApplier(cfg, store).apply()
 
     assert stats["removed_tracks"] == 1
-    assert A not in store.tracks
-    assert B in store.tracks
-    assert store.playlists["night"]["tracks"] == [B]
-    assert store.playlists["oldpl"]["tracks"] == [B]
-    assert store.playlists["likedpl"]["tracks"] == [B]
-    assert A not in store.albums
-    assert set(store.albums) == {B, C}
+    assert B not in store.tracks
+    assert A in store.tracks
+    assert store.playlists["night"]["tracks"] == [A]
+    assert store.playlists["oldpl"]["tracks"] == [A]
+    assert store.playlists["likedpl"]["tracks"] == [A]
+    assert set(store.albums) == {A, C}
     assert "art1" in store.artists
 
     backups = list((tmp_path / "data" / "backups").glob("dedup-*.json"))
     assert len(backups) == 1
     backup = json.loads(backups[0].read_text(encoding="utf-8"))
-    assert backup["removed"][0]["track"]["spotify_id"] == A
-    assert backup["removed"][0]["canonical"] == B
+    assert backup["removed"][0]["track"]["spotify_id"] == B
+    assert backup["removed"][0]["canonical"] == A
 
 
 def test_apply_second_run_is_noop(tmp_path):
@@ -139,7 +154,8 @@ def test_apply_second_run_is_noop(tmp_path):
 def test_apply_respects_user_decision(tmp_path):
     store = _make_store(tmp_path)
     cfg = _cfg(tmp_path)
-    (cfg.root / "decisions.json").write_text(
+    (cfg.root / "data").mkdir(parents=True)
+    (cfg.root / "data" / "decisions.json").write_text(
         json.dumps({ISRC1: {"canonical": A, "reason": "люблю сингл"}}),
         encoding="utf-8",
     )
@@ -153,7 +169,8 @@ def test_apply_respects_user_decision(tmp_path):
 def test_apply_skip_keeps_everything(tmp_path):
     store = _make_store(tmp_path)
     cfg = _cfg(tmp_path)
-    (cfg.root / "decisions.json").write_text(
+    (cfg.root / "data").mkdir(parents=True)
+    (cfg.root / "data" / "decisions.json").write_text(
         json.dumps({ISRC1: {"skip": True, "reason": "не трогать"}}),
         encoding="utf-8",
     )

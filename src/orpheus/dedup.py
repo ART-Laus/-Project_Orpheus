@@ -8,12 +8,11 @@
    проекта один трек может входить в любое количество плейлистов.
 
 Эвристика канона (без album_type — его нет в выгрузке Exportify):
-  1. решение пользователя (data/decisions.json);
-  2. членство в «Liked Songs»;
-  3. не-сингл (имя альбома != имени трека);
-  4. более ранняя дата релиза;
-  5. больше плейлистов;
-  6. стабильный порядок (ID).
+  1. не-сингл (имя альбома != имени трека) — приоритет альбомной версии;
+  2. более ранняя дата релиза (оригинал важнее переиздания/сборки);
+  3. членство в «Liked Songs»;
+  4. больше плейлистов;
+  5. стабильный порядок (ID).
 
 Применение (apply):
   - перелинковка ссылок плейлистов на канонический ID;
@@ -100,13 +99,15 @@ class DedupAnalyzer:
 
         def score(tid: str) -> tuple:
             t = tracks[tid]
-            liked = 1 if t.get("liked") else 0
-            not_single = 0 if _album_name(t, albums).strip().lower() == t.get("name", "").strip().lower() else 1
-            date = _release_date(t, albums)
-            playlists = len(t.get("playlists", []))
-            return (liked, not_single, date, playlists, tid)
+            name = t.get("name", "").strip().lower()
+            album_name = _album_name(t, albums).strip().lower()
+            not_single = 0 if album_name != name else 1
+            date = _release_date(t, albums) or "9999-12-31"
+            liked = -1 if t.get("liked") else 0
+            playlists = -len(t.get("playlists", []))
+            return (not_single, date, liked, playlists, tid)
 
-        return max(member_ids, key=score)
+        return min(member_ids, key=score)
 
     # --- отчёт -------------------------------------------------------------
 
@@ -248,7 +249,7 @@ class DedupApplier:
         self.store = store
 
     def load_decisions(self) -> dict:
-        path = self.cfg.root / DECISIONS_FILE
+        path = self.cfg.root / DECISIONS_PATH
         if not path.exists():
             return {}
         return json.loads(path.read_text(encoding="utf-8"))

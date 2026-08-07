@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from collections import Counter
 
 from .config import Config, ConfigError
 from .csv_importer import CsvImporter
-from .dedup import DedupAnalyzer, DedupApplier
+from .dedup import DedupAnalyzer, DedupApplier, normalize_key
 from .importer import Importer
 from .models import Album, Track
 from .spotify_client import SpotifyClient
@@ -84,7 +83,7 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 
 def _norm_name(name: str) -> str:
-    return re.sub(r"[^a-zа-яё0-9]+", "", name.lower())
+    return normalize_key(name)
 
 
 def cmd_stats(args: argparse.Namespace) -> None:
