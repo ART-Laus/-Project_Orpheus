@@ -51,7 +51,25 @@ class Config:
         self.save_interval_s = imp.get("save_interval_s", 60)
         self.retry_base_s = imp.get("retry_base_s", 2.0)
 
-        self.library = raw.get("library", {})
+        slskd = raw.get("slskd", {})
+        self.slskd_base_url = slskd.get("base_url", "http://localhost:5030")
+        self.slskd_config = self.root / slskd.get("config_path", "tools/slskd/slskd.yml")
+
+        quality = raw.get("quality", {})
+        self.min_mp3_bitrate = quality.get("min_mp3_bitrate", slskd.get("min_mp3_bitrate", 320))
+        self.min_aac_bitrate = quality.get("min_aac_bitrate", slskd.get("min_aac_bitrate", 256))
+        self.duration_tolerance_s = quality.get(
+            "duration_tolerance_s", slskd.get("duration_tolerance_s", 5)
+        )
+        self.verify_tolerance_s = quality.get("verify_tolerance_s", 10)
+        self.max_candidates = quality.get("max_candidates", 5)
+
+        self.sources_config = raw.get("sources", [])
+
+        library = raw.get("library", {})
+        self.library_dir = self.root / library.get("dir", "Library")
+        self.cover_min_size = library.get("cover_min_size", 1000)
+        self.cover_preferred_size = library.get("cover_preferred_size", 1400)
 
         self.cache_path = str(self.root / spot.get("cache_path", ".cache"))
 

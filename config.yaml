@@ -19,9 +19,49 @@ import:
   # Пауза (секунд) перед первым повтором при 429
   retry_base_s: 2.0
 
+slskd:
+  # Локальный демон Soulseek (tools/slskd/), API-ключ читается из config_path
+  base_url: "http://localhost:5030"
+  config_path: "tools/slskd/slskd.yml"
+
+quality:
+  # Общая политика качества: FLAC > нативный AAC/M4A > MP3 >= 320
+  min_mp3_bitrate: 320
+  min_aac_bitrate: 256
+  # Допуск по длительности при сопоставлении результата с треком
+  duration_tolerance_s: 5
+  # Допуск по длительности при проверке скачанного файла (verify)
+  verify_tolerance_s: 10
+  # Сколько кандидатов пробуем скачать для одного трека/альбома
+  max_candidates: 5
+
+sources:
+  # Источники в порядке приоритета: rutracker (альбомами), затем slskd, затем yandex
+  - name: rutracker
+    enabled: true
+    base_url: "https://rutracker.org/forum"
+    login: ""
+    password: ""
+    # Минимальное качество релиза: flac / mp3_320 / any
+    min_quality: "flac"
+    qbit:
+      # qBittorrent-nox WebUI (пароль установлен через API)
+      url: "http://localhost:8080"
+      username: "admin"
+      password: "orpheus"
+  - name: slskd
+    enabled: true
+    base_url: "http://localhost:5030"
+  - name: yandex
+    enabled: true
+    # Токен OAuth: orpheus yandex login (или YANDEX_TOKEN в .env);
+    # секрет хранится в data/cache/yandex_token.txt, не в config.yaml
+    token: ""
+
 library:
-  # Канонические настройки будущей медиатеки (Этап 2)
-  format: "aac"
-  bitrate_kbps: 256
-  cover_min_size: 1000
+  # Медиатека: Library/Исполнитель/Альбом/NN. Название.<ext>
+  dir: "Library"
+  # Обложка засчитывается (cover_verified) только от этого размера
+  # (у Spotify стандарт 640x640)
+  cover_min_size: 640
   cover_preferred_size: 1400

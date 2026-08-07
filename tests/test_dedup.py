@@ -3,6 +3,7 @@ import json
 from orpheus.config import Config
 from orpheus.dedup import DedupAnalyzer, DedupApplier, normalize_key
 from orpheus.models import Album, Track
+from orpheus.statuses import TrackStatus
 from orpheus.store import Store
 
 ISRC1 = "USAAA0100001"
@@ -130,6 +131,7 @@ def test_apply_remaps_deletes_backs_up(tmp_path):
     assert stats["removed_tracks"] == 1
     assert B not in store.tracks
     assert A in store.tracks
+    assert TrackStatus.CANONICAL_VERSION.value in store.tracks[A]["statuses"]
     assert store.playlists["night"]["tracks"] == [A]
     assert store.playlists["oldpl"]["tracks"] == [A]
     assert store.playlists["likedpl"]["tracks"] == [A]
@@ -149,6 +151,7 @@ def test_apply_second_run_is_noop(tmp_path):
     DedupApplier(cfg, store).apply()
     stats = DedupApplier(cfg, store).apply()
     assert stats["removed_tracks"] == 0
+    assert TrackStatus.CANONICAL_VERSION.value in store.tracks[A]["statuses"]
 
 
 def test_apply_respects_user_decision(tmp_path):
@@ -163,6 +166,7 @@ def test_apply_respects_user_decision(tmp_path):
     assert stats["removed_tracks"] == 1
     assert A in store.tracks
     assert B not in store.tracks
+    assert TrackStatus.CANONICAL_VERSION.value in store.tracks[A]["statuses"]
     assert store.playlists["night"]["tracks"] == [A]
 
 

@@ -32,6 +32,7 @@ from typing import Any
 
 from .config import Config
 from .models import Track
+from .statuses import TrackStatus, add_status
 from .store import Store
 
 REPORTS_DIR_NAME = "reports"
@@ -317,6 +318,10 @@ class DedupApplier:
             return
 
         stats["merged_groups"] += 1
+        canonical_track = self.store.tracks[canonical]
+        canonical_track["statuses"] = add_status(
+            canonical_track.get("statuses", []), TrackStatus.CANONICAL_VERSION
+        )
         for m in group["members"]:
             if m["id"] != canonical:
                 remap[m["id"]] = canonical
