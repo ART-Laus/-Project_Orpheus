@@ -1,0 +1,27 @@
+# Project Orpheus — конфигурация проекта
+# Секреты (SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET) хранятся в .env, не в git.
+
+spotify:
+  redirect_uri: "https://example.com/callback"
+  scope: "user-library-read playlist-read-private"
+  cache_path: ".cache"
+
+paths:
+  data_dir: "data"
+  raw_dir: "raw"
+  db_dir: "db"
+
+import:
+  # Сохранять сырые ответы API в data/raw/ для аудита
+  raw_enabled: true
+  # Как часто (секунд) пересохранять базу во время импорта (resume)
+  save_interval_s: 60
+  # Пауза (секунд) перед первым повтором при 429
+  retry_base_s: 2.0
+
+library:
+  # Канонические настройки будущей медиатеки (Этап 2)
+  format: "aac"
+  bitrate_kbps: 256
+  cover_min_size: 1000
+  cover_preferred_size: 1400

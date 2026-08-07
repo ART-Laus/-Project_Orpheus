@@ -1,0 +1,16 @@
+# Секреты
+.env
+.cache
+
+# Окружение
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Данные проекта (база и сырые выгрузки)
+data/
+
+# Личный девлог (переносится в Obsidian, в git не хранится)
+devlog/

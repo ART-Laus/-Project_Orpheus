@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orpheus"
+version = "0.1.0"
+description = "Project Orpheus — ядро личной музыкальной библиотеки"
+requires-python = ">=3.10"
+dependencies = [
+    "spotipy>=2.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+orpheus = "orpheus.cli:main"
