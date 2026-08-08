@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -167,13 +168,36 @@ def build_sources(cfg: Config) -> list[MusicSource]:
     from .slskd_client import SlskdClient
     from .sources.rutracker import RutrackerClient, RutrackerSource
     from .sources.slskd import SlskdSource
+    from .sources.torrents import build_torrent_sources
+    from .sources.bandcamp import BandcampClient, BandcampSource
+    from .sources.jamendo import JamendoClient, JamendoSource
+    from .sources.zaycev import ZaycevClient, ZaycevSource
 
     sources: list[MusicSource] = []
     for section in cfg.sources_config:
         name = section.get("name", "")
         if not section.get("enabled", True):
             continue
-        if name == "slskd":
+        if name == "nicotine":
+            from .nicotine_client import NicotineClient
+            from .sources.nicotine import NicotineSource
+
+            host = section.get("host", "127.0.0.1")
+            port = section.get("port", 5390)
+            sources.append(
+                NicotineSource(
+                    client=NicotineClient(
+                        base_url=f"http://{host}:{port}",
+                        search_timeout_s=section.get("search_timeout_s", 25),
+                    ),
+                    download_dir=cfg.data_dir / "tmp" / "nicotine",
+                    data_dir=cfg.data_dir / "nicotine",
+                    log_dir=cfg.data_dir / "logs",
+                    username=section.get("username", ""),
+                    password=section.get("password", ""),
+                )
+            )
+        elif name == "slskd":
             sources.append(
                 SlskdSource(
                     base_url=section.get("base_url", cfg.slskd_base_url),
@@ -208,6 +232,27 @@ def build_sources(cfg: Config) -> list[MusicSource]:
                     token_file=cfg.data_dir / "cache" / "yandex_token.txt",
                 )
             )
+        elif name == "torrents":
+            qbit = section.get("qbit", {})
+            sources.extend(
+                build_torrent_sources(
+                    cfg,
+                    QbitClient(
+                        base_url=qbit.get("url", "http://localhost:8080"),
+                        username=qbit.get("username", "admin"),
+                        password=qbit.get("password", ""),
+                    ),
+                    raw_sections=section.get("sources", []),
+                )
+            )
+        elif name == "bandcamp":
+            sources.append(BandcampSource(BandcampClient()))
+        elif name == "jamendo":
+            client_id = os.getenv("JAMENDO_CLIENT_ID", section.get("client_id", ""))
+            if client_id:
+                sources.append(JamendoSource(client_id))
+        elif name == "zaycev":
+            sources.append(ZaycevSource(ZaycevClient()))
         else:
             print(f"предупреждение: источник {name!r} неизвестен, пропущен")
     return sources

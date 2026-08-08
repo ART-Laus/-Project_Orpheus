@@ -55,6 +55,12 @@ class Config:
         self.slskd_base_url = slskd.get("base_url", "http://localhost:5030")
         self.slskd_config = self.root / slskd.get("config_path", "tools/slskd/slskd.yml")
 
+        torrents = raw.get("torrents", {})
+        self.torrents_config = torrents.get("sources", [])
+
+        direct = raw.get("direct", {})
+        self.direct_config = direct.get("sources", [])
+
         quality = raw.get("quality", {})
         self.min_mp3_bitrate = quality.get("min_mp3_bitrate", slskd.get("min_mp3_bitrate", 320))
         self.min_aac_bitrate = quality.get("min_aac_bitrate", slskd.get("min_aac_bitrate", 256))

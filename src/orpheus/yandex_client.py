@@ -77,17 +77,27 @@ class YandexClient:
         if params:
             url += "?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(url, headers=self._headers())
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                raise SourceError(
-                    "yandex: токен недействителен — повторите orpheus yandex login"
-                ) from exc
-            raise SourceError(f"yandex: HTTP {exc.code} {path}") from exc
-        except urllib.error.URLError as exc:
-            raise SourceError(f"yandex: {exc.reason} ({url})") from exc
+        delay = 5
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429:
+                    # рейт-лимит: ночные прогоны ждут и повторяют, а не падают
+                    import time
+
+                    time.sleep(delay)
+                    delay *= 3
+                    continue
+                if exc.code == 401:
+                    raise SourceError(
+                        "yandex: токен недействителен — повторите orpheus yandex login"
+                    ) from exc
+                raise SourceError(f"yandex: HTTP {exc.code} {path}") from exc
+            except urllib.error.URLError as exc:
+                raise SourceError(f"yandex: {exc.reason} ({url})") from exc
+        raise SourceError(f"yandex: HTTP 429 {path} (исчерпаны повторы)")
 
     # --- API ---------------------------------------------------------------
 

@@ -347,6 +347,52 @@ def cmd_yandex_login(args: argparse.Namespace) -> None:
     )
 
 
+def _nicotine_section(cfg: Config) -> dict:
+    section = next((s for s in cfg.sources_config if s.get("name") == "nicotine"), {})
+    if not section or not section.get("enabled", True):
+        print("Источник nicotine не найден или отключён в config.yaml", file=sys.stderr)
+        sys.exit(1)
+    return section
+
+
+def cmd_nicotine_bridge(args: argparse.Namespace) -> None:
+    """Запуск моста Nicotine+ (headless Soulseek) в текущем терминале."""
+    from .nicotine.bridge import Bridge, BridgeError
+
+    cfg = Config()
+    section = _nicotine_section(cfg)
+    bridge = Bridge(
+        host=section.get("host", "127.0.0.1"),
+        port=section.get("port", 5390),
+        username=section.get("username", ""),
+        password=section.get("password", ""),
+        data_dir=str(cfg.data_dir / "nicotine"),
+        download_dir=str(cfg.data_dir / "tmp" / "nicotine"),
+    )
+    try:
+        sys.exit(bridge.run())
+    except BridgeError as exc:
+        print(f"Ошибка: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_nicotine_status(args: argparse.Namespace) -> None:
+    """Статус моста: запущен ли, подключён ли к Soulseek."""
+    from .nicotine_client import NicotineClient
+
+    cfg = Config()
+    section = _nicotine_section(cfg)
+    client = NicotineClient(
+        base_url=f"http://{section.get('host', '127.0.0.1')}:{section.get('port', 5390)}"
+    )
+    resp = client.ping()
+    if resp is None:
+        print("Мост Nicotine+ не запущен (запуск: orpheus nicotine bridge, или поднимется сам)")
+        return
+    state = "подключён к Soulseek" if resp.get("connected") else "запущен, но НЕ подключён"
+    print(f"Мост Nicotine+ работает: {state} (аккаунт {resp.get('username', '?')})")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="orpheus", description="Project Orpheus — ядро музыкальной библиотеки"
@@ -438,6 +484,15 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_ya_login.add_argument("--token", default="", help="токен (иначе вводится вручную)")
     p_ya_login.set_defaults(func=cmd_yandex_login)
+
+    p_ni = sub.add_parser("nicotine", help="Мост Nicotine+ (headless Soulseek, WSL)")
+    ni_sub = p_ni.add_subparsers(dest="nicotine_command", required=True)
+    p_ni_bridge = ni_sub.add_parser(
+        "bridge", help="Запустить мост в текущем терминале (Ctrl+C — остановка)"
+    )
+    p_ni_bridge.set_defaults(func=cmd_nicotine_bridge)
+    p_ni_status = ni_sub.add_parser("status", help="Статус моста и подключения к Soulseek")
+    p_ni_status.set_defaults(func=cmd_nicotine_status)
 
     args = parser.parse_args(argv)
     try:

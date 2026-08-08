@@ -36,7 +36,17 @@ quality:
   max_candidates: 5
 
 sources:
-  # Источники в порядке приоритета: rutracker (альбомами), затем slskd, затем yandex
+  # Источники в порядке приоритета. Nicotine+ (Soulseek) — самый верхний
+  # per-track источник; мост поднимается автоматически (нужна учётка
+  # Soulseek, та же, что в Nicotine+ на Windows)
+  - name: nicotine
+    enabled: true
+    host: "127.0.0.1"
+    port: 5390
+    username: ""
+    password: ""
+  # Затем rutracker (альбомами), открытые трекеры (torrents:), прямые
+  # (bandcamp/jamendo/zaycev), затем yandex
   - name: rutracker
     enabled: true
     base_url: "https://rutracker.org/forum"
@@ -49,9 +59,53 @@ sources:
       url: "http://localhost:8080"
       username: "admin"
       password: "orpheus"
-  - name: slskd
+  # Открытые торрент-трекеры (нужен VPN для заблокированных доменов)
+  - name: torrents
     enabled: true
-    base_url: "http://localhost:5030"
+    qbit:
+      url: "http://localhost:8080"
+      username: "admin"
+      password: "orpheus"
+    # Каждый трекер: bases — список зеркал (первое доступное),
+    # min_quality: flac / mp3_320 / any
+    sources:
+      - name: rutor
+        enabled: true
+        bases: ["https://rutor.info", "https://rutor.nl", "http://rutor.org"]
+        min_quality: "mp3_320"
+      - name: x1337
+        enabled: true
+        bases: ["https://x1337x.se", "https://1337x.st", "https://x1337x.eu"]
+        min_quality: "mp3_320"
+      - name: tpb
+        enabled: true
+        bases: ["https://pirate-proxy.club", "https://piratez.xyz", "https://tpb.surf"]
+        min_quality: "any"
+      - name: torrentino
+        enabled: true
+        bases: ["http://torrentino.me"]
+        min_quality: "mp3_320"
+      - name: fast_torrent
+        enabled: true
+        bases: ["http://fast-torrent.ru"]
+        min_quality: "mp3_320"
+      - name: torrentdownloads
+        enabled: true
+        bases: ["https://torrentdownloads.me", "https://torrentdownloads.unblockit.bz"]
+        min_quality: "mp3_320"
+      - name: limetorrents
+        enabled: true
+        bases: ["https://limetorrents.zone", "https://limetor.com"]
+        min_quality: "mp3_320"
+  # Прямые источники
+  - name: bandcamp
+    enabled: true
+  - name: jamendo
+    enabled: true
+    # client_id из https://developer.jamendo.com (или JAMENDO_CLIENT_ID в .env)
+    client_id: ""
+  - name: zaycev
+    enabled: true
   - name: yandex
     enabled: true
     # Токен OAuth: orpheus yandex login (или YANDEX_TOKEN в .env);

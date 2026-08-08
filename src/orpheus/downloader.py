@@ -130,6 +130,9 @@ class Downloader:
             self.processed += 1
             self._progress(f"трек: {', '.join(track.artist_names)} — {track.name}")
             self._process(track)
+            if self.processed % 25 == 0:
+                # чекпоинт: ночной прогон не должен терять статусы при сбое
+                self.store.save_all()
         self._write_missing_report()
         return self.stats
 
@@ -176,6 +179,9 @@ class Downloader:
                     continue
                 if self._finalize(src, verified, track):
                     self.stats["downloaded"] += 1
+            if self.processed % 25 == 0:
+                # чекпоинт: ночной прогон не должен терять статусы при сбое
+                self.store.save_all()
 
     def _pending_tracks(self, name_filter: str) -> list[Track]:
         items = list(self.store.tracks.values())
