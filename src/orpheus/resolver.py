@@ -61,6 +61,9 @@ class Resolver:
                     continue
                 if path and path.exists() and verify_file(path, track, self.policy):
                     return path
+                # файл не прошёл проверку — не копим мусор в staging
+                if path and path.exists() and path.parent == staging:
+                    path.unlink(missing_ok=True)
         return None
 
     # --- per-album ---------------------------------------------------------

@@ -432,7 +432,10 @@ def main(argv: list[str] | None = None) -> None:
         "download", help="Скачивание музыки через Resolver (источники из config.yaml) в Library/"
     )
     p_download.add_argument(
-        "--limit", type=int, default=0, help="максимум треков за запуск (0 = без лимита)"
+        "--limit",
+        type=int,
+        default=0,
+        help="максимум попыток за запуск (0 = без лимита): альбомов в альбомном режиме, треков в поштучном",
     )
     p_download.add_argument(
         "--query", default="", help="скачивать только треки, где имя/исполнитель содержит строку"

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Config
-from .downloader import safe_name
+from .downloader import safe_name, unique_dest
 from .models import Track
 from .store import Store
 
@@ -76,7 +76,8 @@ class LibraryReorganizer:
     # --- классификация -----------------------------------------------------
 
     def _is_album(self, items: list[tuple[str, Track]]) -> bool:
-        """Альбом ли это? Файлов >= ALBUM_MIN_TRACKS или total_tracks >= 5."""
+        """Альбом ли это? Файлов >= ALBUM_MIN_TRACKS, или total_tracks >= 5,
+        или тип альбома из базы — album."""
         if len(items) >= ALBUM_MIN_TRACKS:
             return True
         totals = []
@@ -87,6 +88,8 @@ class LibraryReorganizer:
             if tt:
                 known = True
                 totals.append(tt)
+            if known and (al.get("album_type") or "").lower() == "album":
+                return True
         if known:
             return max(totals) >= ALBUM_MIN_TRACKS
         # total_tracks неизвестен — решаем по номерам дорожек
@@ -277,8 +280,9 @@ class LibraryReorganizer:
             try:
                 if m.src != m.dst:
                     m.dst.parent.mkdir(parents=True, exist_ok=True)
+                    # коллизия имён: не перезаписываем, а дописываем ' (N)'
                     if m.dst.exists():
-                        m.dst.unlink()
+                        m.dst = unique_dest(m.dst.parent, m.dst.stem, m.dst.suffix)
                     shutil.copy2(m.src, m.dst)
                     m.src.unlink(missing_ok=True)
                 self._retag(m, m.artist_changed)
@@ -352,7 +356,10 @@ class LibraryReorganizer:
 
     def _cleanup_empty(self) -> None:
         def has_audio(d: Path) -> bool:
-            return any(p.suffix.lower() in AUDIO_EXTS for p in d.iterdir() if p.is_file())
+            # рекурсивно: аудио может лежать в подпапках (CD1/, сканы/)
+            return any(
+                p.is_file() and p.suffix.lower() in AUDIO_EXTS for p in d.rglob("*")
+            )
 
         for art in self.library.iterdir():
             if not art.is_dir():

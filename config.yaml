@@ -45,20 +45,6 @@ sources:
     port: 5390
     username: ""
     password: ""
-  # Затем rutracker (альбомами), открытые трекеры (torrents:), прямые
-  # (bandcamp/jamendo/zaycev), затем yandex
-  - name: rutracker
-    enabled: true
-    base_url: "https://rutracker.org/forum"
-    login: ""
-    password: ""
-    # Минимальное качество релиза: flac / mp3_320 / any
-    min_quality: "flac"
-    qbit:
-      # qBittorrent-nox WebUI (пароль установлен через API)
-      url: "http://localhost:8080"
-      username: "admin"
-      password: "orpheus"
   # Открытые торрент-трекеры (нужен VPN для заблокированных доменов)
   - name: torrents
     enabled: true
@@ -111,6 +97,22 @@ sources:
     # Токен OAuth: orpheus yandex login (или YANDEX_TOKEN в .env);
     # секрет хранится в data/cache/yandex_token.txt, не в config.yaml
     token: ""
+  # rutracker — в самом низу приоритета: по состоянию на 10.08.2026 поиск
+  # упирается в Cloudflare-челлендж с дата-центрового IP (решение дня:
+  # «в самый низ, чтобы не резал скорость»). Логин при этом рабочий
+  # (куки в data/cache/rutracker_session.txt).
+  - name: rutracker
+    enabled: true
+    base_url: "https://rutracker.org/forum"
+    login: ""
+    password: ""
+    # Минимальное качество релиза: flac / mp3_320 / any
+    min_quality: "flac"
+    qbit:
+      # qBittorrent-nox WebUI (пароль установлен через API)
+      url: "http://localhost:8080"
+      username: "admin"
+      password: "orpheus"
 
 library:
   # Медиатека: Library/Исполнитель/Альбом/NN. Название.<ext>

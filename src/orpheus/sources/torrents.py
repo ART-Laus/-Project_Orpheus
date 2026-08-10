@@ -23,7 +23,7 @@ from pathlib import Path
 
 from ..models import Album, Track
 from ..qbit_client import QbitClient
-from .base import Candidate, MusicSource, SourceError
+from .base import Candidate, MusicSource, SourceError, SourceNotSupported
 
 _SIZE_RE = re.compile(r"([\d.,]+)\s*(TB|GB|MB|KB)", re.I)
 _FORMAT_TAG_RE = re.compile(r"\[([^\]]{2,20})\]")
@@ -343,13 +343,20 @@ class TorrentSource(MusicSource):
         return self._download(cand, dest_dir)
 
     def download_track(self, cand: Candidate, dest_dir: Path) -> Path | None:
-        return self._download(cand, dest_dir)
+        # Результат скачивания — папка релиза, а не файл: трековый режим
+        # честно не поддерживается (остальные источники качают по трекам).
+        raise SourceNotSupported(f"источник {self.name}: скачивание треков не поддерживается")
 
     def _download(self, cand: Candidate, dest_dir: Path) -> Path | None:
         magnet = cand.extra.get("magnet") or self._magnet_for(cand.extra.get("page_path") or "")
         if not magnet:
             return None
-        save_path = self.torrents_dir / f"{self.name}-{abs(hash(magnet))}"
+        # sha1 вместо hash(): abs(hash()) рандомизирован (PYTHONHASHSEED) —
+        # тот же торрент при каждом запуске попадал бы в новый каталог
+        import hashlib
+
+        save_key = hashlib.sha1(magnet.encode("utf-8")).hexdigest()[:24]
+        save_path = self.torrents_dir / f"{self.name}-{save_key}"
         save_path.mkdir(parents=True, exist_ok=True)
         try:
             torrent_hash = self.qbit.add_torrent(magnet, save_path)

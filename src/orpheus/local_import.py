@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Config
-from .downloader import cover_data, safe_name
+from .downloader import cover_data, safe_name, unique_dest
 from .models import Album, Track, local_album_id, local_track_id
 from .statuses import TrackStatus, add_status, has_status
 from .store import Store
@@ -425,10 +425,9 @@ class LocalImporter:
         number = track.track_number or info.track_number or 0
         dest_dir = self.cfg.library_dir / artist / album_name
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"{number:02d}. {safe_name(track.name)}{info.path.suffix.lower()}"
+        stem = f"{number:02d}. {safe_name(track.name)}" if number else safe_name(track.name)
+        dest = unique_dest(dest_dir, stem, info.path.suffix.lower())
         try:
-            if dest.exists():
-                dest.unlink()
             shutil.copy2(info.path, dest)
             self._apply_tags(dest, track, album, info)
             if info.cover:
@@ -448,6 +447,9 @@ class LocalImporter:
         from mutagen.id3 import APIC, ID3, PictureType
 
         ext = path.suffix.lower()
+        album_name = album.get("name") or track.album_name
+        year = (album.get("release_date") or "")[:4]
+        artist0 = track.artist_names[0] if track.artist_names else ""
         try:
             if ext == ".mp3":
                 tags = EasyID3()
@@ -455,23 +457,48 @@ class LocalImporter:
                     tags.load(path)
                 except Exception:
                     pass
+                tags["title"] = track.name
+                tags["artist"] = track.artist_names
+                tags["albumartist"] = artist0
+                tags["album"] = album_name
+                if year:
+                    tags["date"] = year
+                if track.track_number:
+                    tags["tracknumber"] = [str(track.track_number)]
+                tags.save()
+            elif ext in (".m4a", ".aac", ".mp4", ".m4b", ".m4p"):
+                # MP4-теги пишутся штатными атомами — иначе mutagen обрезает
+                # ключ до 4 байт и получаются мусорные атомы titl/arti/albu
+                from mutagen.mp4 import MP4
+
+                m4a = MP4(path)
+                m4a["\xa9nam"] = [track.name]
+                m4a["\xa9ART"] = list(track.artist_names)
+                m4a["aART"] = [artist0]
+                m4a["\xa9alb"] = [album_name]
+                if year:
+                    m4a["\xa9day"] = [year]
+                if track.track_number:
+                    m4a["trkn"] = [(track.track_number, 0)]
+                if track.disc_number:
+                    m4a["disk"] = [(track.disc_number, 0)]
+                m4a.save()
+                tags = m4a
             else:
                 tags = MutagenFile(path, easy=False)
                 if tags is None:
                     return
-        except Exception:
-            return
-        try:
-            tags["title"] = track.name
-            tags["artist"] = track.artist_names
-            tags["albumartist"] = track.artist_names[0] if track.artist_names else ""
-            tags["album"] = album.get("name") or track.album_name
-            year = (album.get("release_date") or "")[:4]
-            if year:
-                tags["date"] = year
-            if track.track_number:
-                tags["tracknumber"] = [str(track.track_number)]
-            tags.save()
+                tags["title"] = track.name
+                tags["artist"] = track.artist_names
+                tags["albumartist"] = artist0
+                tags["album"] = album_name
+                if year:
+                    tags["date"] = year
+                if track.track_number:
+                    tags["tracknumber"] = [str(track.track_number)]
+                if track.disc_number:
+                    tags["discnumber"] = [str(track.disc_number)]
+                tags.save()
         except Exception:
             return
 

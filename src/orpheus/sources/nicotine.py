@@ -40,6 +40,9 @@ class NicotineSource(MusicSource):
         self.search_timeout_s = search_timeout_s
 
     def available(self) -> bool:
+        if not self.username or not self.password:
+            # без кредов мост не залогинится — не тратим 60с на ожидание
+            return False
         try:
             resp = self.client.ping()
         except Exception:
