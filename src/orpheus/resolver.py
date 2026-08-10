@@ -257,6 +257,17 @@ def build_sources(cfg: Config) -> list[MusicSource]:
                 sources.append(JamendoSource(client_id))
         elif name == "zaycev":
             sources.append(ZaycevSource(ZaycevClient()))
+        elif name == "deezer":
+            from .sources.deezer import DeezerSource
+
+            sources.append(
+                DeezerSource(
+                    arl=section.get("arl", ""),
+                    arl_file=cfg.data_dir / "cache" / "deezer_arl.txt",
+                    request_interval=section.get("request_interval", 0.25),
+                    stream_interval=section.get("stream_interval", 0.8),
+                )
+            )
         else:
             print(f"предупреждение: источник {name!r} неизвестен, пропущен")
     return sources

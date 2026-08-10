@@ -92,6 +92,14 @@ sources:
     client_id: ""
   - name: zaycev
     enabled: true
+  # Deezer Premium: MP3 320 через неофициальный API (как deemix). ARL-кука
+  # (192 символа) из браузера после входа на deezer.com:
+  # DevTools -> Application -> Cookies -> arl -> в data/cache/deezer_arl.txt.
+  # ARL живёт ~90-120 дней, протухает при смене пароля/выходе. Позиция ниже
+  # Яндекса (он лучше для русского каталога); пересмотреть после
+  # scripts/deezer_coverage.py
+  - name: deezer
+    enabled: true
   - name: yandex
     enabled: true
     # Токен OAuth: orpheus yandex login (или YANDEX_TOKEN в .env);
