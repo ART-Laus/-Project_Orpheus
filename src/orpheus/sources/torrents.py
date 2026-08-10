@@ -259,11 +259,15 @@ class TorrentSource(MusicSource):
     # --- доступность -----------------------------------------------------
 
     def available(self) -> bool:
-        try:
-            self._fetch(self.bases[0])
-            return True
-        except Exception:
-            return False
+        # живое хотя бы одно зеркало базы — источник доступен;
+        # иначе первый же мёртвый домен (rutor.info) хоронит весь источник
+        for base in self.bases:
+            try:
+                self._fetch(base)
+                return True
+            except Exception:
+                continue
+        return False
 
     # --- поиск ------------------------------------------------------------
 

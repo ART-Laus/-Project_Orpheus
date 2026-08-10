@@ -216,6 +216,7 @@ def build_sources(cfg: Config) -> list[MusicSource]:
                         base_url=section.get("base_url", "https://rutracker.org/forum"),
                         cache_dir=cfg.data_dir / "cache",
                         timeout_s=10,
+                        proxy=section.get("proxy", ""),
                     ),
                     qbit=QbitClient(
                         base_url=qbit.get("url", "http://localhost:8080"),

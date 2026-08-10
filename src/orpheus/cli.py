@@ -292,6 +292,7 @@ def cmd_rutracker_login(args: argparse.Namespace) -> None:
     client = RutrackerClient(
         base_url=section.get("base_url", "https://rutracker.org/forum"),
         cache_dir=cfg.data_dir / "cache",
+        proxy=section.get("proxy", ""),
     )
     status = client.login(login, password)
     while status == "captcha":

@@ -147,12 +147,17 @@ class RutrackerClient:
         base_url: str = "https://rutracker.org/forum",
         cache_dir: Path | None = None,
         timeout_s: int = 20,
+        proxy: str = "",
     ):
         self.base_url = base_url.rstrip("/")
         self.cache_dir = cache_dir
         self.timeout_s = timeout_s
+        self.proxy = proxy
         self.jar = http.cookiejar.LWPCookieJar()
-        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+        handlers: list = [urllib.request.HTTPCookieProcessor(self.jar)]
+        if proxy and proxy.startswith(("http://", "https://")):
+            handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        self._opener = urllib.request.build_opener(*handlers)
         if cache_dir and (cache_dir / SESSION_COOKIE_FILE).exists():
             try:
                 self.jar.load(cache_dir / SESSION_COOKIE_FILE)
@@ -167,27 +172,50 @@ class RutrackerClient:
             except Exception:
                 pass
 
+    def _open(self, req: urllib.request.Request) -> str:
+        """Открыть URL, вернуть HTML. SOCKS-прокси (socks5/socks5h) — через
+        PySocks: Cloudflare не челленджит домашние IP, туннель на Windows
+        (ssh -D / tailscale) даёт «домашний» выход для rutracker."""
+        if self.proxy and self.proxy.startswith("socks"):
+            import socket
+
+            import socks
+
+            parts = urllib.parse.urlsplit(self.proxy)
+            socks.set_default_proxy(
+                socks.SOCKS5, parts.hostname or "127.0.0.1", parts.port or 1080, rdns=True
+            )
+            original = socket.socket
+            socket.socket = socks.socksocket  # type: ignore[assignment]
+            try:
+                with self._opener.open(req, timeout=self.timeout_s) as resp:
+                    return resp.read().decode("cp1251", errors="replace")
+            finally:
+                socket.socket = original
+                socks.set_default_proxy(None)
+        with self._opener.open(req, timeout=self.timeout_s) as resp:
+            return resp.read().decode("cp1251", errors="replace")
+
     def _get(self, path: str) -> str:
         try:
-            with self._opener.open(
-                urllib.request.Request(self.base_url + path, headers={"User-Agent": "Mozilla/5.0"}), timeout=self.timeout_s
-            ) as resp:
-                return resp.read().decode("cp1251", errors="replace")
+            return self._open(
+                urllib.request.Request(
+                    self.base_url + path, headers={"User-Agent": "Mozilla/5.0"}
+                )
+            )
         except urllib.error.URLError as exc:
             raise SourceError(f"rutracker: {exc.reason} ({self.base_url + path})") from exc
 
     def _post(self, path: str, data: dict[str, str]) -> str:
         body = urllib.parse.urlencode(data).encode()
         try:
-            with self._opener.open(
+            return self._open(
                 urllib.request.Request(
                     self.base_url + path,
                     data=body,
                     headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/x-www-form-urlencoded"},
-                ),
-                timeout=self.timeout_s,
-            ) as resp:
-                return resp.read().decode("cp1251", errors="replace")
+                )
+            )
         except urllib.error.URLError as exc:
             raise SourceError(f"rutracker: {exc.reason}") from exc
 
