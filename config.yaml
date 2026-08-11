@@ -40,14 +40,14 @@ sources:
   # per-track источник; мост поднимается автоматически (нужна учётка
   # Soulseek, та же, что в Nicotine+ на Windows)
   - name: nicotine
-    enabled: true
+    enabled: false
     host: "127.0.0.1"
     port: 5390
     username: ""
     password: ""
   # Открытые торрент-трекеры (нужен VPN для заблокированных доменов)
   - name: torrents
-    enabled: true
+    enabled: false
     qbit:
       url: "http://localhost:8080"
       username: "admin"
@@ -85,13 +85,13 @@ sources:
         min_quality: "mp3_320"
   # Прямые источники
   - name: bandcamp
-    enabled: true
+    enabled: false
   - name: jamendo
-    enabled: true
+    enabled: false
     # client_id из https://developer.jamendo.com (или JAMENDO_CLIENT_ID в .env)
     client_id: ""
   - name: zaycev
-    enabled: true
+    enabled: false
   # Deezer Premium: MP3 320 через неофициальный API (как deemix). ARL-кука
   # (192 символа) из браузера после входа на deezer.com:
   # DevTools -> Application -> Cookies -> arl -> в data/cache/deezer_arl.txt.
@@ -101,7 +101,7 @@ sources:
   - name: deezer
     enabled: true
   - name: yandex
-    enabled: true
+    enabled: false
     # Токен OAuth: orpheus yandex login (или YANDEX_TOKEN в .env);
     # секрет хранится в data/cache/yandex_token.txt, не в config.yaml
     token: ""
@@ -110,7 +110,7 @@ sources:
   # «в самый низ, чтобы не резал скорость»). Логин при этом рабочий
   # (куки в data/cache/rutracker_session.txt).
   - name: rutracker
-    enabled: true
+    enabled: false
     base_url: "https://rutracker.org/forum"
     login: ""
     password: ""
@@ -124,8 +124,9 @@ sources:
 
 library:
   # Медиатека: Library/Исполнитель/Альбом/NN. Название.<ext>
-  # с 11.08.2026 библиотека живёт на внешнем диске E: (смонтирован как /mnt/e)
-  dir: "/mnt/e/Library"
+  # с 12.08.2026 снова в проекте (внешний диск E: отключён, идёт докачка
+  # через Deezer в Library/ проекта)
+  dir: "Library"
   # Обложка засчитывается (cover_verified) только от этого размера
   # (у Spotify стандарт 640x640)
   cover_min_size: 640

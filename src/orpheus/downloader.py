@@ -244,11 +244,28 @@ class Downloader:
         return result
 
     def _is_canonical_with_file(self, rec: dict) -> bool:
-        """Канонический трек, чей файл реально существует в Library."""
+        """Канонический трек, чей файл реально существует в Library.
+
+        Пути: 'Library/...' — относительно корня проекта (или внешней
+        библиотеки, если та смонтирована), абсолютные — как есть.
+        Несуществующая ФС (несмонтированный диск) трактуется как отсутствие
+        файла, а не как ошибка прогона.
+        """
         if not has_status(rec.get("statuses", []), TrackStatus.CANONICAL_VERSION):
             return False
         f = rec.get("file")
-        return bool(f) and (self.cfg.root / f).exists()
+        if not f:
+            return False
+        p = Path(f)
+        if not p.is_absolute():
+            if f.startswith("Library/"):
+                p = self.cfg.library_dir / f[len("Library/"):]
+            else:
+                p = self.cfg.root / p
+        try:
+            return p.exists()
+        except OSError:
+            return False
 
     def _process(self, track: Track) -> None:
         try:
