@@ -124,7 +124,8 @@ sources:
 
 library:
   # Медиатека: Library/Исполнитель/Альбом/NN. Название.<ext>
-  dir: "Library"
+  # с 11.08.2026 библиотека живёт на внешнем диске E: (смонтирован как /mnt/e)
+  dir: "/mnt/e/Library"
   # Обложка засчитывается (cover_verified) только от этого размера
   # (у Spotify стандарт 640x640)
   cover_min_size: 640

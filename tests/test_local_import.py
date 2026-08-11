@@ -68,7 +68,7 @@ def _store(tmp_path) -> Store:
     return store
 
 
-def make_mp3(path: Path, title: str, artist: str = "playingtheangel", seconds: int = 200):
+def make_mp3(path: Path, title: str, artist: str = "playingtheangel", seconds: int = 200, album: str = ""):
     """Валидный MP3 (кадры + ID3-теги + встроенная обложка)."""
     from mutagen.easyid3 import EasyID3
     from mutagen.id3 import APIC, ID3, PictureType
@@ -85,6 +85,8 @@ def make_mp3(path: Path, title: str, artist: str = "playingtheangel", seconds: i
     tags = EasyID3()
     tags["title"] = title
     tags["artist"] = artist
+    if album:
+        tags["album"] = album
     tags.save(path)
     id3 = ID3(path)
     id3.add(
@@ -253,3 +255,86 @@ def test_unknown_album_becomes_local(tmp_path: Path):
 
     assert stats.matched == 0
     assert stats.local_added == 1
+
+
+def test_live_folder_not_matched(tmp_path: Path):
+    """Файлы из папки концерта не матчатся с базой (студийная версия жива)."""
+    cfg = _cfg(tmp_path)
+    store = _store(tmp_path)
+
+    src = tmp_path / "52201" / "концерты"
+    make_mp3(src / "01. Карнавальный дракон (Live).mp3", "Карнавальный дракон")
+
+    importer = LocalImporter(cfg, store, src.parent)
+    stats = importer.run()
+
+    assert stats.matched == 0
+    assert stats.local_added == 1
+    assert store.tracks["t1"]["name"] == "Карнавальный дракон"  # не тронут
+
+
+def test_cd_folder_uses_album_tag(tmp_path: Path):
+    """Папки CD1/CD2 не становятся альбомами — берётся тег album."""
+    cfg = _cfg(tmp_path)
+    store = _store(tmp_path)
+
+    src = tmp_path / "52201" / "main" / "1993. Птица [Most CD 941]" / "CD2"
+    make_mp3(src / "11. Песня.mp3", "Песня", album="Птица")
+
+    importer = LocalImporter(cfg, store, src.parent.parent.parent)
+    stats = importer.run()
+
+    assert stats.matched == 0
+    assert stats.local_added == 1
+    local = [t for t in store.tracks.values() if t.get("is_local")]
+    assert local[0]["album_name"] == "Птица"
+    dest = tmp_path / "Library" / "playingtheangel" / "Птица" / "11. Песня.mp3"
+    assert dest.exists()
+
+
+def test_dry_run_makes_no_changes(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    store = _store(tmp_path)
+
+    src = tmp_path / "52201" / "Альбомы" / "playingtheangel - CARNIVAL DRAGON (2018)"
+    make_mp3(src / "01. Карнавальный дракон.mp3", "Карнавальный дракон")
+    make_mp3(src / "06. Space Cake.mp3", "Space Cake")
+
+    importer = LocalImporter(cfg, store, src.parent.parent, dry_run=True)
+    stats = importer.run()
+
+    assert stats.matched == 2
+    assert stats.files == 2
+    lib = tmp_path / "Library" / "playingtheangel" / "CARNIVAL DRAGON"
+    assert not lib.exists()
+    assert store.tracks["t2"]["name"] == "Space"  # канон не применён
+
+
+def test_old_file_on_external_library_replaced(tmp_path: Path):
+    """Старый файл живёт во внешней библиотеке (абсолютный library.dir)."""
+    ext = tmp_path / "ext" / "Library"
+    (tmp_path / "config.yaml").write_text(
+        f"paths:\n  data_dir: data\nlibrary:\n  dir: {ext}\n  cover_min_size: 640\n",
+        encoding="utf-8",
+    )
+    cfg = Config(project_root=tmp_path)
+    store = _store(tmp_path)
+
+    old_dir = ext / "playingtheangel" / "CARNIVAL DRAGON"
+    old_dir.mkdir(parents=True)
+    old_file = old_dir / "06. Space.mp3"
+    old_file.write_bytes(b"old-censored")
+    store.tracks["t2"]["file"] = str(old_file)
+
+    src = tmp_path / "52201" / "Альбомы" / "playingtheangel - CARNIVAL DRAGON (2018)"
+    make_mp3(src / "06. Space Cake.mp3", "Space Cake")
+
+    importer = LocalImporter(cfg, store, src.parent.parent)
+    stats = importer.run()
+
+    assert stats.replaced == 1
+    assert not old_file.exists()
+    dest = ext / "playingtheangel" / "CARNIVAL DRAGON" / "06. Space Cake.mp3"
+    assert dest.exists()
+    # путь может быть относительным (внутри корня) — важно, что указывает на dest
+    assert Path(tmp_path) / store.tracks["t2"]["file"] == dest

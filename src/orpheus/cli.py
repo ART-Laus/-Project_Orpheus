@@ -182,7 +182,7 @@ def cmd_import_local(args: argparse.Namespace) -> None:
 
     cfg = Config()
     store = _load(cfg)
-    importer = LocalImporter(cfg, store, args.directory)
+    importer = LocalImporter(cfg, store, args.directory, dry_run=args.dry_run)
     stats = importer.run()
     print(f"Файлов в папке:        {stats.files}")
     print(f"Сматчено с базой:      {stats.matched}")

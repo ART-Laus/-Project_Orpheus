@@ -37,7 +37,15 @@ _NUM_PREFIX = re.compile(r"^\s*(\d{1,3})\s*[-._\s]*(.*)$")
 _FEAT = re.compile(r"\s*(?:\(?\s*(?:feat|ft|featuring)\.?[^)]*\)?)?$", re.I)
 _ARTIST_FROM_FOLDER = re.compile(r"^(.*?)\s*[-–—]\s*(.+)$")
 _YEAR_TAG = re.compile(r"\s*\(\s*(\d{4}(?:\.\d{2}(?:\.\d{2})?)?)\s*\)\s*$")
+_STRUCT_FOLDER = re.compile(r"^\s*(?:cd|диск|disc)\s*\d+.*$|^12''\d+$", re.I)
+_BAD_ALBUM_TAG = re.compile(
+    r"^(?:unknown(?: album)?|сборник|various(?: artists)?|разное|"
+    r"сборник|музыка|track\s*\d+.*)$",
+    re.I,
+)
 _EP_TAG = re.compile(r"\s*\(\s*EP\s*\)\s*$")
+# Папки лайвов/концертов: их файлы НЕ матчим с базой, кладём как локальные
+_LIVE_RE = re.compile(r"(live|концерт|bootleg)", re.I)
 
 
 def _norm(text: str) -> str:
@@ -93,11 +101,13 @@ class LocalImporter:
         store: Store,
         folder: Path,
         duration_tolerance_s: int = 10,
+        dry_run: bool = False,
     ):
         self.cfg = cfg
         self.store = store
         self.folder = Path(folder)
         self.tolerance_ms = duration_tolerance_s * 1000
+        self.dry_run = dry_run
         self.stats = ImportStats()
         self._by_title: dict[str, list[Track]] = defaultdict(list)
         self._by_album_pos: dict[str, dict[int, list[Track]]] = defaultdict(
@@ -195,7 +205,15 @@ class LocalImporter:
 
     # --- матчинг ----------------------------------------------------------
 
+    def _is_live_folder(self, info: FileInfo) -> bool:
+        """Файл лежит в папке с признаком live/концерта — матчить нельзя."""
+        parts = [p.name for p in info.path.resolve().parent.parents]
+        parts.append(info.path.parent.name)
+        return any(_LIVE_RE.search(p) for p in parts)
+
     def _match(self, info: FileInfo, folder_name: str) -> tuple[Track | None, str]:
+        if self._is_live_folder(info):
+            return None, ""
         want = _norm(clean_title(info.title))
 
         cands = [t for t in self._by_title.get(want, []) if t.spotify_id not in self._used_tracks]
@@ -254,8 +272,15 @@ class LocalImporter:
     def _process_file(self, info: FileInfo) -> None:
         track, how = self._match(info, info.path.parent.name)
         if track:
+            if self.dry_run:
+                self.stats.matched += 1
+                self.stats.matched_by[how] += 1
+                return
             self._import_matched(info, track, how)
         else:
+            if self.dry_run:
+                self.stats.local_added += 1
+                return
             self._import_local(info)
 
     def _file_path(self, dest: Path) -> str:
@@ -264,6 +289,20 @@ class LocalImporter:
             return str(dest.relative_to(self.cfg.root))
         except ValueError:
             return str(dest)
+
+    def _resolve_old_file(self, old_file: str, dest: Path) -> Path | None:
+        """Где лежит старый файл: абсолютный путь, или root/Library, или
+        библиотека на внешнем диске (/mnt/e/Library...)."""
+        p = Path(old_file)
+        if p.is_absolute():
+            return p if p.exists() and p != dest else None
+        cands = [self.cfg.root / old_file]
+        if old_file.startswith("Library/"):
+            cands.append(self.cfg.library_dir / old_file[len("Library/"):])
+        for c in cands:
+            if c.exists() and c != dest:
+                return c
+        return None
 
     # --- сматченный трек ---------------------------------------------------
 
@@ -297,10 +336,11 @@ class LocalImporter:
             self.stats.errors.append(f"{info.path}: не удалось разложить файл")
             return
 
-        # старый (зацензуренный) файл, если путь изменился
+        # старый (зацензуренный) файл, если путь изменился; после переезда
+        # библиотеки на E: старые пути могут ссылаться на обе ФС
         if old_file and self._file_path(dest) != old_file:
-            old_path = self.cfg.root / old_file
-            if old_path.exists() and old_path != dest:
+            old_path = self._resolve_old_file(old_file, dest)
+            if old_path is not None:
                 old_path.unlink(missing_ok=True)
                 self.stats.replaced += 1
 
@@ -395,7 +435,7 @@ class LocalImporter:
     def _album_meta(
         self, info: FileInfo, folder_name: str, title: str
     ) -> tuple[str, str, str]:
-        """Альбом для локального трека: из структуры папки."""
+        """Альбом для локального трека: из тега файла, иначе из папки."""
         parent = info.path.parent.name or ""
         year = _YEAR_TAG.search(folder_name)
         date = year.group(1).replace(".", "-") if year else ""
@@ -408,6 +448,15 @@ class LocalImporter:
 
         # Трекография/NN. Артист - Название
         if "трекографи" in folder_name.lower() or "трекографи" in parent.lower():
+            return title, "single", ""
+
+        # Альбом из тега файла — в торрент-пакетах надёжнее имён папок
+        tag_album = (info.album_tag or "").strip()
+        if tag_album and _BAD_ALBUM_TAG.search(tag_album) is None:
+            return _strip_suffix_tags(tag_album), "album", date
+
+        # Структурные папки (CD1/CD2/Диск 1/12''1...) — не имена альбомов
+        if _STRUCT_FOLDER.match(folder_name):
             return title, "single", ""
 
         # Альбомы/Артист - Название (ГГГГ)
@@ -426,9 +475,16 @@ class LocalImporter:
         dest_dir = self.cfg.library_dir / artist / album_name
         dest_dir.mkdir(parents=True, exist_ok=True)
         stem = f"{number:02d}. {safe_name(track.name)}" if number else safe_name(track.name)
+        dest = dest_dir / f"{stem}{info.path.suffix.lower()}"
+        # идемпотентность: тот же канон уже разложен — не копируем повторно
+        if dest.exists() and dest.stat().st_size == info.path.stat().st_size:
+            return dest
         dest = unique_dest(dest_dir, stem, info.path.suffix.lower())
         try:
-            shutil.copy2(info.path, dest)
+            # copy2 не подходит: copystat/utime падает EPERM на drvfs-монтировке
+            # (внешний диск); большие буферы тоже — 9p замедляется. 64 КБ — ок.
+            with info.path.open("rb") as fsrc, open(dest, "wb") as fdst:
+                shutil.copyfileobj(fsrc, fdst, 64 * 1024)
             self._apply_tags(dest, track, album, info)
             if info.cover:
                 self._write_cover(dest_dir, info.cover)
@@ -554,10 +610,11 @@ def default_statuses() -> list[str]:
 
 
 def _strip_suffix_tags(name: str) -> str:
-    """Убирает хвосты ' (EP)' и ' (ГГГГ...)' повторно (могут идти подряд)."""
+    """Убирает хвосты ' (EP)', ' (ГГГГ...)' и '[каталожный номер]'."""
     while True:
         new = _EP_TAG.sub("", name)
         new = _YEAR_TAG.sub("", new)
+        new = re.sub(r"\s*\[[^\]]*\]\s*$", "", new)
         if new == name:
             return name
         name = new

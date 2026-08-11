@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -177,18 +178,37 @@ class LibraryReorganizer:
     def _track_from(self, tid: str) -> Track:
         return Track.from_dict(self.store.tracks[tid])
 
+    def _abs(self, f: str) -> Path:
+        """Привести путь из БД к абсолютному: относительные 'Library/...'
+        и root-относительные трактуются относительно внешней библиотеки."""
+        p = Path(f)
+        if p.is_absolute():
+            return p
+        if f.startswith("Library/"):
+            return self.library / f[len("Library/"):]
+        return self.cfg.root / p
+
     def plan(self) -> list[Move]:
         """План переносов. Не меняет ни файлы, ни базу."""
-        # (артист-папка, альбом-папка) -> [(file, Track)]
-        groups: dict[tuple[str, str], list[tuple[str, Track]]] = defaultdict(list)
+        # (артист-папка, альбом-папка) -> [(src_abs, Track)]
+        groups: dict[tuple[str, str], list[tuple[Path, Track]]] = defaultdict(list)
         for tid, rec in self.store.tracks.items():
             f = rec.get("file")
             if not f:
                 continue
-            parts = Path(f).parts
-            if len(parts) < 3:
-                continue
-            groups[(parts[1], parts[2])].append((f, self._track_from(tid)))
+            p = self._abs(f)
+            if str(p).startswith(str(self.library)):
+                rel = p.relative_to(self.library)
+                if len(rel.parts) < 3:
+                    continue
+                groups[(rel.parts[0], rel.parts[1])].append((p, self._track_from(tid)))
+            elif str(p).startswith(str(self.cfg.root)):
+                rel = p.relative_to(self.cfg.root)
+                if len(rel.parts) < 4 or rel.parts[0] != "Library":
+                    continue
+                groups[(rel.parts[1], rel.parts[2])].append((p, self._track_from(tid)))
+            else:
+                self.stats.untouched.append(str(p))
 
         # слить case-варианты одной физической папки ("Побочки"/"ПОБОЧКИ"):
         # ключ по нижнему регистру, а реальные пути берём из первой записи
@@ -210,32 +230,26 @@ class LibraryReorganizer:
                 singles[(artist_key, album_key)] = items
             else:
                 first = items[0][0]
-                self.stats.ambiguous.append(f"{Path(first).parts[1]}/{Path(first).parts[2]}")
+                self.stats.ambiguous.append(f"{first.parent.parent.name}/{first.parent.name}")
 
         moves: list[Move] = []
         singles_moves: list[Move] = []
 
         for (artist_key, album_key), items in merged.items():
             first = items[0][0]
-            artist_dir = Path(first).parts[1]
-            album_dir = Path(first).parts[2]
+            artist_dir = first.parent.parent.name
+            album_dir = first.parent.name
             canon = self._canon_artist(artist_dir)
             artist_canon = safe_name(canon)
             if (artist_key, album_key) in album_keys:
                 # альбом — папка сохраняется, при смене артиста переезжает
-                for f, t in items:
-                    src = self.cfg.root / f
-                    dst = self.library / artist_canon / album_dir / Path(f).name
-                    # case-вариант одной физической папки — файл не трогаем,
-                    # но путь в базе нормализуем
-                    if src != dst and src.resolve().as_posix().lower() == dst.resolve().as_posix().lower():
-                        dst = src
+                for src, t in items:
+                    dst = self.library / artist_canon / album_dir / src.name
                     if src != dst:
                         moves.append(Move(src, dst, t.spotify_id, artist_dir != canon))
                 self.stats.albums += 1
             elif (artist_key, album_key) in singles:
-                for f, t in items:
-                    src = self.cfg.root / f
+                for src, t in items:
                     singles_moves.append(
                         Move(src, Path(""), t.spotify_id, artist_dir != canon)
                     )
@@ -283,8 +297,14 @@ class LibraryReorganizer:
                     # коллизия имён: не перезаписываем, а дописываем ' (N)'
                     if m.dst.exists():
                         m.dst = unique_dest(m.dst.parent, m.dst.stem, m.dst.suffix)
-                    shutil.copy2(m.src, m.dst)
-                    m.src.unlink(missing_ok=True)
+                    try:
+                        # rename в пределах тома мгновенный; drvfs не
+                        # поддерживает utime, поэтому copy2 не подходит
+                        os.replace(m.src, m.dst)
+                    except OSError:
+                        with m.src.open("rb") as fsrc, open(m.dst, "wb") as fdst:
+                            shutil.copyfileobj(fsrc, fdst, 64 * 1024)
+                        m.src.unlink(missing_ok=True)
                 self._retag(m, m.artist_changed)
             except Exception as exc:  # noqa: BLE001
                 self.stats.errors.append(f"{m.src} -> {m.dst}: {exc}")
@@ -295,7 +315,7 @@ class LibraryReorganizer:
                 try:
                     rel = str(rel.relative_to(self.cfg.root))
                 except ValueError:
-                    pass
+                    rel = str(rel)
                 rec["file"] = rel
                 self.store.tracks[m.track_id] = rec
 
