@@ -42,6 +42,7 @@ class DeezerSource(MusicSource):
         max_results: int = 6,
         request_interval: float = 0.25,
         stream_interval: float = 0.8,
+        prefer_flac: bool = False,
     ):
         kwargs: dict = {}
         if arl:
@@ -51,6 +52,7 @@ class DeezerSource(MusicSource):
         self.client = DeezerClient(**kwargs)
         self.duration_tolerance_s = duration_tolerance_s
         self.max_results = max_results
+        self.prefer_flac = prefer_flac
         self._account_ok: bool | None = None
 
     def available(self) -> bool:
@@ -104,7 +106,7 @@ class DeezerSource(MusicSource):
             return None
         dest: Path | None = None
         try:
-            media = self.client.track_media(int(track_id))
+            media = self.client.track_media(int(track_id), prefer_flac=self.prefer_flac)
             if not media:
                 return None
             url = self.client.stream_url(media)
@@ -112,7 +114,7 @@ class DeezerSource(MusicSource):
             title = _safe_name(cand.extra.get("title") or "Трек")
             ext = self.client.media_extension(media)
             dest = dest_dir / f"{artist} - {title}{ext}"
-            self.client.download(url, dest)
+            self.client.download(url, dest, sng_id=int(track_id))
         except Exception:
             return None
         if dest is not None and dest.exists() and dest.stat().st_size > 0:
@@ -189,13 +191,13 @@ class DeezerSource(MusicSource):
                 title = t.get("title") or ""
                 if not track_id or not title:
                     continue
-                media = self.client.track_media(int(track_id))
+                media = self.client.track_media(int(track_id), prefer_flac=self.prefer_flac)
                 if not media:
                     continue
                 url = self.client.stream_url(media)
                 ext = self.client.media_extension(media)
                 dest = dest_dir / f"{number:02d}. {_safe_name(title)}{ext}"
-                self.client.download(url, dest)
+                self.client.download(url, dest, sng_id=int(track_id))
                 if dest.exists() and dest.stat().st_size > 0:
                     ok += 1
         except Exception:

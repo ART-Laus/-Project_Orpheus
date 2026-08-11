@@ -1,6 +1,7 @@
 """Тесты клиента и источника Deezer (на фейковом HTTP-сервере).
 
-Публичный API (api.deezer.com) + gw-light + CDN эмулируются одним сервером.
+Публичный API (api.deezer.com) + gw-light + media API + CDN эмулируются
+одним сервером.
 """
 
 import http.server
@@ -60,24 +61,28 @@ ALBUM_TRACKS = {
     ]
 }
 
-MEDIA_BITS = {
-    "111": [
-        {"type": "mp3", "format": "MP3_128", "quality": 1,
-         "href": "http://127.0.0.1:{port}/media/111-128.mp3"},
-        {"type": "mp3", "format": "MP3_320", "quality": 3,
-         "href": "http://127.0.0.1:{port}/media/111-320.mp3"},
-    ],
-    "501": [{"type": "mp3", "format": "MP3_320", "quality": 3,
-             "href": "http://127.0.0.1:{port}/media/501.mp3"}],
-    "502": [{"type": "mp3", "format": "MP3_320", "quality": 3,
-             "href": "http://127.0.0.1:{port}/media/502.mp3", "license_token": "tok-502"}],
+# Какие форматы доступны «аккаунту» (web_hq/web_lossless)
+ACCOUNT_OPTIONS = {"web_hq": True, "web_lossless": True, "license_token": "lic-1"}
+
+# track_id -> данные из song.getData
+TRACK_DATA = {
+    "111": {"TRACK_TOKEN": "tok-111", "FILESIZE_MP3_320": "1000", "FILESIZE_FLAC": "2000"},
+    "501": {"TRACK_TOKEN": "tok-501", "FILESIZE_MP3_320": "1000"},
+    "502": {"TRACK_TOKEN": "tok-502", "FILESIZE_MP3_320": "1000"},
+}
+
+# media API: token -> url
+MEDIA_URLS = {
+    "tok-111": "http://127.0.0.1:{port}/cdn/111.mp3",
+    "tok-501": "http://127.0.0.1:{port}/cdn/501.mp3",
+    "tok-502": "http://127.0.0.1:{port}/cdn/502.mp3",
 }
 
 FILE_BYTES = b"ID3\x04\x00\x00\x00\x00\x00\x00fake-mp3-bytes-for-tests"
 
 
 class FakeDeezerServer(http.server.BaseHTTPRequestHandler):
-    """Мини-сервер: публичный API + gw-light + CDN."""
+    """Мини-сервер: публичный API + gw-light + media API + CDN."""
 
     valid_arl = "test-arl"
 
@@ -99,6 +104,29 @@ class FakeDeezerServer(http.server.BaseHTTPRequestHandler):
         self.wfile.write(FILE_BYTES)
 
     def do_POST(self):
+        if self.path.startswith("/media-api"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+            token = (body.get("track_tokens") or [""])[0]
+            url = MEDIA_URLS.get(token)
+            if not url:
+                self._json({"error": "no source"}, code=404)
+                return
+            self._json(
+                {
+                    "data": [
+                        {
+                            "media": [
+                                {
+                                    "sources": [
+                                        {"url": url.format(port=self.server.server_address[1])}
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            )
+            return
         if not self.path.startswith("/gw-light"):
             self._json({"error": "not found"}, code=404)
             return
@@ -111,30 +139,33 @@ class FakeDeezerServer(http.server.BaseHTTPRequestHandler):
             self._json(
                 {
                     "results": {
-                        "USER": {"USER_ID": 42, "LOGIN": "tester", "COUNTRY": "US"},
-                        "api_token": "tok-abc",
+                        "USER": {
+                            "USER_ID": 42,
+                            "LOGIN": "tester",
+                            "COUNTRY": "US",
+                            "OPTIONS": ACCOUNT_OPTIONS,
+                        },
+                        "checkForm": "check-abc",
+                        "SESSION_ID": "sess-1",
+                        "OFFER_NAME": "Deezer Premium",
                     }
                 }
             )
-        elif method == "track.getData":
+        elif method == "song.getData":
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
-            sng_id = str(body[0].get("sng_id", ""))
-            self._json(
-                {
-                    "results": {
-                        "error": 0,
-                        "media": [
-                            {**m, "href": m["href"].format(port=self.server.server_address[1])}
-                            for m in MEDIA_BITS.get(sng_id, [])
-                        ],
-                    }
-                }
-            )
+            if isinstance(body, list):
+                body = body[0] if body else {}
+            sng_id = str(body.get("SNG_ID", ""))
+            data = TRACK_DATA.get(sng_id)
+            if not data:
+                self._json({"error": ["DATA_ERROR", "unknown track"]})
+                return
+            self._json({"results": data})
         else:
             self._json({"results": {"ERROR": f"unknown method {method}"}})
 
     def do_GET(self):
-        if self.path.startswith("/media/"):
+        if self.path.startswith("/cdn/"):
             self._media(self.path.split("/")[-1])
             return
         path = urllib.parse.urlsplit(self.path).path
@@ -168,6 +199,7 @@ def deezer():
             arl="test-arl",
             public_base=f"http://127.0.0.1:{port}",
             gw_base=f"http://127.0.0.1:{port}/gw-light",
+            media_api=f"http://127.0.0.1:{port}/media-api",
             request_interval=0,
             stream_interval=0,
         ),
@@ -215,6 +247,7 @@ def test_account_info_and_search(deezer):
     client, _source, _port = deezer
     info = client.account_info()
     assert info["user_id"] == 42 and info["login"] == "tester"
+    assert "FLAC" in info["formats"] and "MP3_320" in info["formats"]
     results = client.search("Daft Punk Around the World")
     assert results and results[0]["id"] == "111"
 
@@ -261,6 +294,7 @@ def test_gw_invalid_arl():
             arl="bad-arl",
             public_base=f"http://127.0.0.1:{port}",
             gw_base=f"http://127.0.0.1:{port}/gw-light",
+            media_api=f"http://127.0.0.1:{port}/media-api",
             request_interval=0,
             stream_interval=0,
         )
@@ -270,9 +304,23 @@ def test_gw_invalid_arl():
         server.shutdown()
 
 
-def test_stream_url_appends_license_token():
+def test_track_media_returns_flac_when_requested(deezer):
+    client, _source, _port = deezer
+    media = client.track_media(111, prefer_flac=True)
+    assert media is not None and media["format"] == "FLAC"
+    assert media["track_token"] == "tok-111"
+    assert client.media_extension(media) == ".flac"
+
+
+def test_stream_url_goes_through_media_api(deezer):
+    client, _source, _port = deezer
+    media = client.track_media(111)
+    assert media is not None
+    url = client.stream_url(media)
+    assert "/cdn/" in url and "111.mp3" in url
+
+
+def test_stream_url_requires_token():
     client = DeezerClient(arl="x")
-    url = client.stream_url(
-        {"href": "http://cdn/0.mp3?k=1", "license_token": "tok"}
-    )
-    assert "license_token=tok" in url
+    with pytest.raises(SourceError):
+        client.stream_url({"format": "MP3_320"})
