@@ -197,7 +197,7 @@ def test_pending_orders_by_coverage_verdict(tmp_path):
 
 
 def test_downloaded_skipped_counts(tmp_path):
-    """Уже скачанные треки не идут в работу и попадают в счётчик skipped."""
+    """Уже скачанные треки (статус downloaded) не идут в работу и попадают в skipped."""
     cfg = _cfg(tmp_path)
     store = _store(tmp_path)
     src = FakeSource([_cand("/a/x.mp3", 11_000_000, 320, 2)], None, tmp_path)
@@ -478,3 +478,23 @@ def test_torrent_download_track_raises_not_supported(tmp_path):
     cand = Candidate(source="rutor", filename="x", size=1, extension=".mp3")
     with pytest.raises(SourceNotSupported):
         src.download_track(cand, tmp_path)
+
+
+def test_match_files_handles_feat_and_zero_numbers(tmp_path):
+    """Файлы без нумерации и фиты в скобках сопоставляются с треками базы."""
+    from orpheus.resolver import match_files_to_tracks
+
+    folder = tmp_path / "album"
+    folder.mkdir()
+    make_mp3(folder / "00. Lust For Life.mp3", duration_s=2.0, bitrate=320)
+    make_mp3(folder / "00. 13 Beaches.mp3", duration_s=2.0, bitrate=320)
+    make_mp3(folder / "00. Love.mp3", duration_s=2.0, bitrate=320)
+    t1 = _track(spotify_id="a" * 22, name="Lust For Life (with The Weeknd)", track_number=2)
+    t2 = _track(spotify_id="b" * 22, name="13 Beaches", track_number=3)
+    t3 = _track(spotify_id="c" * 22, name="Love", track_number=1)
+    matched = match_files_to_tracks(folder, [t1, t2, t3])
+    assert {k: v.name for k, v in matched.items()} == {
+        t1.spotify_id: "00. Lust For Life.mp3",
+        t2.spotify_id: "00. 13 Beaches.mp3",
+        t3.spotify_id: "00. Love.mp3",
+    }

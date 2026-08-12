@@ -116,12 +116,22 @@ _NON_WORD = re.compile(r"[^a-zа-яё0-9]+")
 
 
 def _norm_title(text: str) -> str:
-    """Нормализация названия для сравнения: без номера дорожки, нижний регистр."""
+    """Нормализация названия файла: без номера дорожки, нижний регистр."""
     text = text or ""
     m = _NUM_PREFIX.match(text.strip())
     if m:
         text = m.group(2)
     return _NON_WORD.sub("", text.lower())
+
+
+def _bare_title(text: str) -> str:
+    """Название без версии в скобках: 'Love (with the Weeknd)' -> 'Love'.
+
+    Deezer хранит основной title отдельно от версии, Spotify — целиком,
+    поэтому фиты/ремиксы в скобках убираются из сравнения.
+    """
+    text = text or ""
+    return _NON_WORD.sub("", text.split(" (", 1)[0].lower())
 
 
 def match_files_to_tracks(
@@ -130,7 +140,8 @@ def match_files_to_tracks(
     """Сопоставление файлов скачанного релиза с треками базы.
 
     Сначала по номеру дорожки в имени файла ("01. Песня"), затем по
-    нормализованному названию. Файл засчитывается после проверки качества.
+    нормализованному названию (без версии в скобках и без префикса номера).
+    Файл засчитывается после проверки качества.
     """
     policy = policy or QualityPolicy()
     files = [
@@ -140,12 +151,17 @@ def match_files_to_tracks(
     ]
     by_number: dict[int, list[Path]] = {}
     by_name: dict[str, Path] = {}
+    by_bare: dict[str, Path] = {}
     for p in files:
         stem = p.stem
         m = _NUM_PREFIX.match(stem.strip())
         if m and m.group(1).isdigit():
             by_number.setdefault(int(m.group(1)), []).append(p)
         by_name.setdefault(_norm_title(stem), p)
+        if m:
+            by_bare.setdefault(_bare_title(m.group(2)), p)
+        else:
+            by_bare.setdefault(_bare_title(stem), p)
 
     result: dict[str, Path] = {}
     used: set[Path] = set()
@@ -153,6 +169,10 @@ def match_files_to_tracks(
         cand_files: list[Path] = []
         if track.track_number:
             cand_files = [p for p in by_number.get(track.track_number, []) if p not in used]
+        if not cand_files:
+            p = by_bare.get(_bare_title(track.name))
+            if p and p not in used:
+                cand_files = [p]
         if not cand_files:
             p = by_name.get(_norm_title(track.name))
             if p and p not in used:
@@ -266,6 +286,8 @@ def build_sources(cfg: Config) -> list[MusicSource]:
                     arl_file=cfg.data_dir / "cache" / "deezer_arl.txt",
                     request_interval=section.get("request_interval", 0.25),
                     stream_interval=section.get("stream_interval", 0.8),
+                    prefer_flac=section.get("prefer_flac", False),
+                    parallel=section.get("parallel", 1),
                 )
             )
         else:

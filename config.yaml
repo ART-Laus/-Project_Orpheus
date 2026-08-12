@@ -104,6 +104,8 @@ sources:
     # скорости; при анти-бане (429/временные сбои) вернуть 0.25/0.8
     request_interval: 0.1
     stream_interval: 0.3
+    # сколько треков альбома качаются одновременно (CDN-стримы — узкое место)
+    parallel: 3
   - name: yandex
     enabled: false
     # Токен OAuth: orpheus yandex login (или YANDEX_TOKEN в .env);

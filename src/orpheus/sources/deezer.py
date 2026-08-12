@@ -12,6 +12,7 @@ HiFi). Файлы складываются как есть — теги и ра�
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..deezer_client import DeezerClient
@@ -43,6 +44,7 @@ class DeezerSource(MusicSource):
         request_interval: float = 0.25,
         stream_interval: float = 0.8,
         prefer_flac: bool = False,
+        parallel: int = 1,
     ):
         kwargs: dict = {}
         if arl:
@@ -55,6 +57,7 @@ class DeezerSource(MusicSource):
         self.duration_tolerance_s = duration_tolerance_s
         self.max_results = max_results
         self.prefer_flac = prefer_flac
+        self.parallel = max(1, parallel)
         self._account_ok: bool | None = None
 
     def available(self) -> bool:
@@ -155,13 +158,18 @@ class DeezerSource(MusicSource):
         return cands
 
     @staticmethod
-    def _tracklist(album: dict) -> list[dict]:
-        """Треки альбома с абсолютными номерами (через диски), как в базе."""
+    def _tracklist(album: dict) -> list[tuple[int, dict]]:
+        """Треки альбома с абсолютными номерами (через диски), как в базе.
+
+        Публичный Deezer API не отдаёт нумерацию треков (нет position /
+        track_position) — порядок в списке и есть трек-лист, поэтому номер
+        берётся из индекса.
+        """
         raw = (album.get("tracks") or {}).get("data") or []
         tracks = []
-        for t in raw:
+        for i, t in enumerate(raw):
             disc = int(t.get("disk_number") or 1)
-            pos = int(t.get("track_position") or 0)
+            pos = int(t.get("track_position") or t.get("position") or (i + 1))
             tracks.append({"disc": disc, "pos": pos, "data": t})
         tracks.sort(key=lambda t: (t["disc"], t["pos"] or 9999))
         disc_sizes: dict[int, int] = {}
@@ -188,20 +196,36 @@ class DeezerSource(MusicSource):
                 return None
             dest_dir.mkdir(parents=True, exist_ok=True)
             ok = 0
-            for number, t in tracks:
-                track_id = str(t.get("id") or "")
-                title = t.get("title") or ""
-                if not track_id or not title:
-                    continue
-                media = self.client.track_media(int(track_id), prefer_flac=self.prefer_flac)
-                if not media:
-                    continue
-                url = self.client.stream_url(media)
-                ext = self.client.media_extension(media)
-                dest = dest_dir / f"{number:02d}. {_safe_name(title)}{ext}"
-                self.client.download(url, dest, sng_id=int(track_id))
-                if dest.exists() and dest.stat().st_size > 0:
-                    ok += 1
+            if self.parallel > 1 and len(tracks) > 1:
+                with ThreadPoolExecutor(max_workers=self.parallel) as pool:
+                    results = pool.map(
+                        lambda t: self._download_one(t, dest_dir), tracks
+                    )
+                    ok = sum(1 for r in results if r)
+            else:
+                for t in tracks:
+                    if self._download_one(t, dest_dir):
+                        ok += 1
         except Exception:
             return None
         return dest_dir if ok else None
+
+    def _download_one(self, item: tuple[int, dict], dest_dir: Path) -> bool:
+        """Один трек альбома: метаданные -> CDN-URL -> файл на диск. False при
+        любой ошибке, чтобы отдельный трек не ронял весь альбом."""
+        number, t = item
+        track_id = str(t.get("id") or "")
+        title = t.get("title") or ""
+        if not track_id or not title:
+            return False
+        try:
+            media = self.client.track_media(int(track_id), prefer_flac=self.prefer_flac)
+            if not media:
+                return False
+            url = self.client.stream_url(media)
+            ext = self.client.media_extension(media)
+            dest = dest_dir / f"{number:02d}. {_safe_name(title)}{ext}"
+            self.client.download(url, dest, sng_id=int(track_id))
+            return dest.exists() and dest.stat().st_size > 0
+        except Exception:
+            return False
