@@ -49,6 +49,8 @@ class DeezerSource(MusicSource):
             kwargs["arl"] = arl
         if arl_file:
             kwargs["arl_file"] = arl_file
+        kwargs["request_interval"] = request_interval
+        kwargs["stream_interval"] = stream_interval
         self.client = DeezerClient(**kwargs)
         self.duration_tolerance_s = duration_tolerance_s
         self.max_results = max_results
