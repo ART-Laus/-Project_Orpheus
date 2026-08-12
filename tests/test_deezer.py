@@ -287,6 +287,25 @@ def test_download_album_numbering_across_discs(deezer, tmp_path):
     assert names == ["01. Daftendirekt.mp3", "06. WDPK 83.7 FM.mp3"]
 
 
+def test_download_album_parallel_matches_sequential(deezer, tmp_path):
+    client, source, _port = deezer
+    _patch_source(client, source)
+    cands = source.search_album(_album())
+    parallel = DeezerSource(
+        arl="test-arl",
+        request_interval=0,
+        stream_interval=0,
+        parallel=4,
+    )
+    _patch_source(client, parallel)
+    dest_dir = parallel.download_album(cands[0], tmp_path / "par")
+    assert dest_dir is not None
+    names = sorted(p.name for p in dest_dir.iterdir())
+    assert names == ["01. Daftendirekt.mp3", "06. WDPK 83.7 FM.mp3"]
+    for p in dest_dir.iterdir():
+        assert p.read_bytes() == FILE_BYTES
+
+
 def test_gw_invalid_arl():
     server, port = _serve()
     try:

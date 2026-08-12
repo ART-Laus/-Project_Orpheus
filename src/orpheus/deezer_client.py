@@ -30,6 +30,7 @@ import json
 import os
 import random
 import shutil
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -97,6 +98,7 @@ class DeezerClient:
         self._license_token: str = ""
         self._last_request = 0.0
         self._last_stream = 0.0
+        self._user_lock = threading.Lock()
 
     # --- токен ------------------------------------------------------------
 
@@ -240,15 +242,18 @@ class DeezerClient:
 
     def get_user_data(self) -> dict:
         """Профиль + api_token/checkForm и sid для последующих вызовов."""
-        if not self.arl:
-            raise SourceError("deezer: нет ARL-токена (data/cache/deezer_arl.txt)")
-        results = self._gw("deezer.getUserData", {}, retry_token=False)
-        self._api_token = results.get("checkForm") or ""
-        self._sid = results.get("SESSION_ID") or ""
-        options = (results.get("USER") or {}).get("OPTIONS") or {}
-        self._license_token = options.get("license_token") or ""
-        self._user_data = results
-        return results
+        with self._user_lock:
+            if self._api_token and self._sid and self._user_data is not None:
+                return self._user_data
+            if not self.arl:
+                raise SourceError("deezer: нет ARL-токена (data/cache/deezer_arl.txt)")
+            results = self._gw("deezer.getUserData", {}, retry_token=False)
+            self._api_token = results.get("checkForm") or ""
+            self._sid = results.get("SESSION_ID") or ""
+            options = (results.get("USER") or {}).get("OPTIONS") or {}
+            self._license_token = options.get("license_token") or ""
+            self._user_data = results
+            return results
 
     def account_info(self) -> dict:
         """Краткая сводка аккаунта для диагностики: имя, id, подписка."""
