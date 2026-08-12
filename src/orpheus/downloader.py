@@ -243,16 +243,12 @@ class Downloader:
             result.append(track)
         return result
 
-    def _is_canonical_with_file(self, rec: dict) -> bool:
-        """Канонический трек, чей файл реально существует в Library.
+    def _file_exists(self, rec: dict) -> bool:
+        """Файл трека реально существует на диске (Library или внешняя ФС).
 
-        Пути: 'Library/...' — относительно корня проекта (или внешней
-        библиотеки, если та смонтирована), абсолютные — как есть.
-        Несуществующая ФС (несмонтированный диск) трактуется как отсутствие
-        файла, а не как ошибка прогона.
+        Статус downloaded без файла (например, старая библиотека на забытом
+        внешнем диске) не освобождает трек от перекачки.
         """
-        if not has_status(rec.get("statuses", []), TrackStatus.CANONICAL_VERSION):
-            return False
         f = rec.get("file")
         if not f:
             return False
@@ -266,6 +262,12 @@ class Downloader:
             return p.exists()
         except OSError:
             return False
+
+    def _is_canonical_with_file(self, rec: dict) -> bool:
+        """Канонический трек, чей файл реально существует в Library."""
+        if not has_status(rec.get("statuses", []), TrackStatus.CANONICAL_VERSION):
+            return False
+        return self._file_exists(rec)
 
     def _process(self, track: Track) -> None:
         try:
