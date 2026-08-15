@@ -74,6 +74,10 @@ class Config:
 
         library = raw.get("library", {})
         self.library_dir = self.root / library.get("dir", "Library")
+        self.library_secondary_dirs = [
+            Path(d) if Path(d).is_absolute() else self.root / d
+            for d in library.get("secondary_dirs", [])
+        ]
         self.cover_min_size = library.get("cover_min_size", 1000)
         self.cover_preferred_size = library.get("cover_preferred_size", 1400)
 

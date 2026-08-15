@@ -124,6 +124,7 @@ class Downloader:
         self.stats = {"found": 0, "downloaded": 0, "skipped": 0, "failed": 0}
         self.missing: list[dict] = []
         self._coverage: dict[str, str] = {}
+        self._cover_cache: dict[str, dict | None] = {}
 
     # --- главный цикл ------------------------------------------------------
 
@@ -144,7 +145,7 @@ class Downloader:
             if not current:
                 continue
             track = Track.from_dict(current)
-            if has_status(track.statuses, TrackStatus.DOWNLOADED):
+            if has_status(track.statuses, TrackStatus.DOWNLOADED) and self._file_exists(current):
                 continue
             if self._is_canonical_with_file(current):
                 continue
@@ -165,8 +166,16 @@ class Downloader:
     def _has_album_sources(self) -> bool:
         return any(getattr(src, "album_capable", False) for src in self.resolver.sources)
 
+    _THIN_ALBUM_MAX = 2  # альбомы с таким числом pending-треков качаем по-треково
+
     def _run_albums(self, pending: list[Track], limit: int) -> None:
-        """Альбомный режим: группируем треки по альбомам и качаем релизы целиком."""
+        """Альбомный режим: группируем треки по альбомам и качаем релизы целиком.
+
+        «Тонкие» альбомы (1-2 трека в очереди) качаются по-треково: целый релиз
+        скачивать ради одного трека невыгодно, это раздувает CDN-трафик в разы.
+        Если по-треково что-то не нашлось — добираем альбомным режимом, так что
+        количество скачанного не меняется.
+        """
         from .models import Album
 
         by_album: dict[str, list[Track]] = {}
@@ -187,27 +196,61 @@ class Downloader:
             album = Album.from_dict(rec)
             self.processed += len(tracks)
             artist = ", ".join(album.artist_names) or "Неизвестный исполнитель"
-            self._progress(f"альбом: {artist} — {album.name}")
-            # свой staging на альбом: файлы разных релизов не смешиваются,
-            # остатки предыдущего альбома не попадают в сопоставление следующего
-            own = self.staging / f"album-{album_id[:24]}"
-            own.mkdir(parents=True, exist_ok=True)
-            try:
-                matched = self.resolver.resolve_album(album, tracks, own)
-            except Exception:
-                matched = {}
-            for track in tracks:
-                src = matched.get(track.spotify_id)
-                if not src:
-                    continue
-                self.stats["found"] += 1
-                verified = verify_file(src, track, self.policy)
-                if not verified:
-                    continue
-                if self._finalize(src, verified, track):
-                    self.stats["downloaded"] += 1
-            # остатки (несматченные файлы) не должны попасть в следующий альбом
-            shutil.rmtree(own, ignore_errors=True)
+            if len(tracks) <= self._THIN_ALBUM_MAX:
+                self._progress(f"альбом: {artist} — {album.name} (по-треково)")
+                failed: list[Track] = []
+                for track in tracks:
+                    self._process(track)
+                    current = self.store.tracks.get(track.spotify_id) or {}
+                    if not has_status(current.get("statuses", []), TrackStatus.DOWNLOADED):
+                        failed.append(track)
+                # страховка: что не удалось по-треково — добираем релизом целиком
+                if failed:
+                    names = ", ".join(
+                        f"{t.artist_names[0] if t.artist_names else '?'} — {t.name}"
+                        for t in failed
+                    )
+                    self._progress(
+                        f"fallback (альбом): {artist} — {album.name} | {names}"
+                    )
+                    own = self.staging / f"album-{album_id[:24]}"
+                    own.mkdir(parents=True, exist_ok=True)
+                    try:
+                        matched = self.resolver.resolve_album(album, failed, own, return_verified=True)
+                    except Exception:
+                        matched = {}
+                    for track in failed:
+                        item = matched.get(track.spotify_id)
+                        if not item:
+                            continue
+                        src, verified = item
+                        self.stats["found"] += 1
+                        if self._finalize(src, verified, track):
+                            self.stats["downloaded"] += 1
+                            # per-track уже записал провал — снимаем его
+                            self.missing = [m for m in self.missing if m.get("id") != track.spotify_id]
+                            self.stats["failed"] = max(0, self.stats["failed"] - 1)
+                    shutil.rmtree(own, ignore_errors=True)
+            else:
+                self._progress(f"альбом: {artist} — {album.name}")
+                # свой staging на альбом: файлы разных релизов не смешиваются,
+                # остатки предыдущего альбома не попадают в сопоставление следующего
+                own = self.staging / f"album-{album_id[:24]}"
+                own.mkdir(parents=True, exist_ok=True)
+                try:
+                    matched = self.resolver.resolve_album(album, tracks, own, return_verified=True)
+                except Exception:
+                    matched = {}
+                for track in tracks:
+                    item = matched.get(track.spotify_id)
+                    if not item:
+                        continue
+                    src, verified = item
+                    self.stats["found"] += 1
+                    if self._finalize(src, verified, track):
+                        self.stats["downloaded"] += 1
+                # остатки (несматченные файлы) не должны попасть в следующий альбом
+                shutil.rmtree(own, ignore_errors=True)
             if attempts % 10 == 0:
                 # чекпоинт: ночной прогон не должен терять статусы при сбое
                 self.store.save_all()
@@ -229,7 +272,9 @@ class Downloader:
         result = []
         for rec in items:
             track = Track.from_dict(rec)
-            if has_status(track.statuses, TrackStatus.DOWNLOADED):
+            if has_status(track.statuses, TrackStatus.DOWNLOADED) and self._file_exists(rec):
+                # статус проставлен и файл реально лежит на одном из корней
+                # медиатеки (C: или secondary) — не перекачиваем
                 self.stats["skipped"] += 1
                 continue
             if self._is_canonical_with_file(rec):
@@ -244,22 +289,32 @@ class Downloader:
         return result
 
     def _file_exists(self, rec: dict) -> bool:
-        """Файл трека реально существует на диске (Library или внешняя ФС).
+        """Файл трека реально существует на одном из корней медиатеки.
 
         Статус downloaded без файла (например, старая библиотека на забытом
-        внешнем диске) не освобождает трек от перекачки.
+        внешнем диске — secondary_dirs из config.yaml) не освобождает трек
+        от перекачки.
         """
         f = rec.get("file")
         if not f:
             return False
         p = Path(f)
-        if not p.is_absolute():
-            if f.startswith("Library/"):
-                p = self.cfg.library_dir / f[len("Library/"):]
-            else:
-                p = self.cfg.root / p
+        if p.is_absolute():
+            try:
+                return p.exists()
+            except OSError:
+                return False
+        if f.startswith("Library/"):
+            rel = f[len("Library/"):]
+            for root in (self.cfg.library_dir, *self.cfg.library_secondary_dirs):
+                try:
+                    if (root / rel).exists():
+                        return True
+                except OSError:
+                    continue
+            return False
         try:
-            return p.exists()
+            return (self.cfg.root / p).exists()
         except OSError:
             return False
 
@@ -422,6 +477,17 @@ class Downloader:
             pass
 
     def _cover_data(self, album: dict) -> dict | None:
+        """Данные обложки альбома с кэшем: 1 сетевой запрос на альбом.
+
+        Раньше обложка скачивалась заново на каждый трек релиза — альбом на
+        10 треков давал 10 одинаковых запросов. Ответы кэшируются на время
+        прогона (включая None — неудачу), на диск не пишутся.
+        """
+        key = str(album.get("spotify_id") or album.get("id") or "")
+        if key:
+            if key not in self._cover_cache:
+                self._cover_cache[key] = cover_data(album, self.opts.cover_min_size)
+            return self._cover_cache[key]
         return cover_data(album, self.opts.cover_min_size)
 
     def _cover_ok(self, album: dict) -> bool:

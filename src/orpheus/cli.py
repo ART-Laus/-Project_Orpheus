@@ -11,6 +11,7 @@ from .csv_importer import CsvImporter
 from .dedup import DedupAnalyzer, DedupApplier, normalize_key
 from .downloader import DownloadOptions, Downloader
 from .importer import Importer
+from .library_check import LibraryCheck
 from .models import Album, Track
 from .quality import QualityPolicy
 from .resolver import Resolver, build_sources
@@ -62,6 +63,87 @@ def cmd_dedup_apply(args: argparse.Namespace) -> None:
     print(f"Объединено групп:   {stats['merged_groups']}")
     print(f"Удалено треков:     {stats['removed_tracks']}")
     print(f"Перелинковано ссылок: {stats['remapped_refs']}")
+
+
+def cmd_library_check(args: argparse.Namespace) -> None:
+    cfg = Config()
+    store = _load(cfg)
+    check = LibraryCheck(cfg, store)
+    result = check.analyze()
+    path = check.write_report(result)
+    c = result["counts"]
+    print(
+        f"only_c={c['only_c']} only_e={c['only_e']} "
+        f"both_same={c['both_same']} both_diff={c['both_diff']} "
+        f"nowhere={c['nowhere']} download={c['download']} phantom={c['phantom']}"
+    )
+    print(f"Отчёт: {path}")
+
+
+def cmd_library_phantom(args: argparse.Namespace) -> None:
+    cfg = Config()
+    store = _load(cfg)
+    check = LibraryCheck(cfg, store)
+    result = check.find_phantoms()
+    path = check.write_phantom_report(result)
+    print(
+        f"Фантомов (downloaded без файла): {result['count']}, "
+        f"из них с похожим файлом по названию: {result['with_fuzzy']}"
+    )
+    print(f"Отчёт: {path}")
+
+
+def cmd_library_fix_paths(args: argparse.Namespace) -> None:
+    """Переписать file-поле фантомов на найденные файлы (путь устарел)."""
+    cfg = Config()
+    store = _load(cfg)
+    check = LibraryCheck(cfg, store)
+    result = check.fix_phantom_paths()
+    path = check.write_fix_report(result)
+    print(
+        f"Исправлено путей: {len(result['fixed'])}, "
+        f"неоднозначных (не тронуто): {len(result['ambiguous'])}"
+    )
+    print(f"Отчёт: {path}")
+    if args.dry_run:
+        print("DRY-RUN: база не изменена")
+    else:
+        store.save_all()
+        print("База сохранена.")
+
+
+def cmd_library_merge(args: argparse.Namespace) -> None:
+    """Умный перенос C:\\Library → E:\\Library (объединение)."""
+    from .library_merge import LibraryMerge
+
+    cfg = Config()
+    store = _load(cfg)
+    merger = LibraryMerge(cfg, store)
+    plan = merger.plan(artist_filter=args.artist)
+    if args.apply:
+        result = merger.apply(plan)
+        store.save_all()
+    else:
+        result = plan
+    path = merger.write_report(result)
+    c = result["counts"]
+    freed_mb = c["freed_bytes_c"] / 1024 / 1024
+    print(f"Файлов на C:: {c['files_c']}, на E:: {c['files_e']}")
+    print(
+        f"перенести: {c['move']}  вырезать дублей: {c['dup']}  "
+        f"неоднозначно: {c['ambiguous']}"
+    )
+    print(
+        f"без трека: перенести {c['unknown_move']}, вырезать {c['unknown_dup']}"
+    )
+    print(f"Освободится на C:: {freed_mb:.1f} МБ")
+    if result["errors"]:
+        print(f"Ошибок: {len(result['errors'])}")
+    if args.apply:
+        print("Выполнено. База сохранена.")
+    else:
+        print("DRY-RUN: ничего не изменено (применить: --apply)")
+    print(f"Отчёт: {path}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -421,6 +503,41 @@ def main(argv: list[str] | None = None) -> None:
         help="Перелинковка плейлистов и удаление неканонических версий",
     )
     p_dedup_apply.set_defaults(func=cmd_dedup_apply)
+
+    p_lib = sub.add_parser(
+        "library",
+        help="Проверка медиатеки C:⇄E:: категории, варианты (дубли), список на докачку",
+    )
+    lib_sub = p_lib.add_subparsers(dest="library_command", required=True)
+    p_lib_check = lib_sub.add_parser(
+        "check", help="Анализ присутствия файлов и выбор канона среди вариантов (read-only)"
+    )
+    p_lib_check.set_defaults(func=cmd_library_check)
+    p_lib_phantom = lib_sub.add_parser(
+        "phantom", help="Список фантомов: downloaded, файла нет ни на C:, ни на E: (read-only)"
+    )
+    p_lib_phantom.set_defaults(func=cmd_library_phantom)
+    p_lib_fix = lib_sub.add_parser(
+        "fix-paths",
+        help="Переписать file-поле фантомов на найденный по названию файл "
+        "(после завершения прогона скачивания)",
+    )
+    p_lib_fix.add_argument(
+        "--dry-run", action="store_true", help="показать план без изменений базы"
+    )
+    p_lib_fix.set_defaults(func=cmd_library_fix_paths)
+    p_lib_merge = lib_sub.add_parser(
+        "merge",
+        help="Умный перенос C:\\Library → E:\\Library: переносятся только файлы, "
+        "которых нет на E:; дубли вырезаются с C: (объединение)",
+    )
+    p_lib_merge.add_argument(
+        "--apply", action="store_true", help="выполнить перенос (по умолчанию — план)"
+    )
+    p_lib_merge.add_argument(
+        "--artist", default="", help="только папка исполнителя (префикс пути)"
+    )
+    p_lib_merge.set_defaults(func=cmd_library_merge)
 
     p_status = sub.add_parser("status", help="Сводка по статусам треков")
     p_status.set_defaults(func=cmd_status)

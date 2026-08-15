@@ -100,12 +100,12 @@ sources:
   # scripts/deezer_coverage.py
   - name: deezer
     enabled: true
-    # паузы между запросами (0.1 c) и стримами (0.3 c) — снижены для
-    # скорости; при анти-бане (429/временные сбои) вернуть 0.25/0.8
-    request_interval: 0.1
-    stream_interval: 0.3
+    # паузы для защиты от анти-бана (ночная сессия с нулевыми паузами
+    # привела к сбросу ARL) — вернули 0.25/0.8
+    request_interval: 0.25
+    stream_interval: 0.8
     # сколько треков альбома качаются одновременно (CDN-стримы — узкое место)
-    parallel: 3
+    parallel: 10
   - name: yandex
     enabled: false
     # Токен OAuth: orpheus yandex login (или YANDEX_TOKEN в .env);
@@ -133,6 +133,10 @@ library:
   # с 12.08.2026 снова в проекте (внешний диск E: отключён, идёт докачка
   # через Deezer в Library/ проекта)
   dir: "Library"
+  # Вторичные корни медиатеки: файлы здесь считаются скачанными
+  # (основная «сокровищница» — внешний диск E:)
+  secondary_dirs:
+    - "/mnt/e/Library"
   # Обложка засчитывается (cover_verified) только от этого размера
   # (у Spotify стандарт 640x640)
   cover_min_size: 640

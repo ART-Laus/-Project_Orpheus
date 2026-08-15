@@ -197,9 +197,13 @@ def test_pending_orders_by_coverage_verdict(tmp_path):
 
 
 def test_downloaded_skipped_counts(tmp_path):
-    """Уже скачанные треки (статус downloaded) не идут в работу и попадают в skipped."""
+    """Уже скачанные треки (статус downloaded + файл на диске) не идут в работу и попадают в skipped."""
     cfg = _cfg(tmp_path)
     store = _store(tmp_path)
+    dest = cfg.library_dir / "Исполнитель" / "Альбом" / "01. Песня.mp3"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"x" * 100)
+    store.tracks[ID]["file"] = str(dest.relative_to(tmp_path))
     src = FakeSource([_cand("/a/x.mp3", 11_000_000, 320, 2)], None, tmp_path)
     dl = Downloader(cfg, store, _resolver([src]), DownloadOptions(library_dir=cfg.library_dir))
     store.tracks[ID]["statuses"] = ["downloaded", "manual_review"]

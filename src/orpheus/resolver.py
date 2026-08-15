@@ -69,9 +69,14 @@ class Resolver:
     # --- per-album ---------------------------------------------------------
 
     def resolve_album(
-        self, album: Album, tracks: list[Track], staging: Path
-    ) -> dict[str, Path]:
-        """Скачать релиз и сопоставить файлы с треками: {spotify_id: path}."""
+        self, album: Album, tracks: list[Track], staging: Path, return_verified: bool = False
+    ) -> dict:
+        """Скачать релиз и сопоставить файлы с треками.
+
+        return_verified=True: возвращает {spotify_id: (path, verified)}, где
+        verified — результат проверки качества из match_files_to_tracks (без
+        повторного verify_file в вызывающем коде).
+        """
         for src in self.sources:
             if not self._available(src):
                 continue
@@ -88,7 +93,9 @@ class Resolver:
                     continue
                 if not folder or not folder.exists():
                     continue
-                matched = match_files_to_tracks(folder, tracks, self.policy)
+                matched = match_files_to_tracks(
+                    folder, tracks, self.policy, return_verified=return_verified
+                )
                 if matched:
                     return matched
         return {}
@@ -135,13 +142,17 @@ def _bare_title(text: str) -> str:
 
 
 def match_files_to_tracks(
-    folder: Path, tracks: list[Track], policy: QualityPolicy | None = None
-) -> dict[str, Path]:
+    folder: Path, tracks: list[Track], policy: QualityPolicy | None = None,
+    return_verified: bool = False,
+) -> dict:
     """Сопоставление файлов скачанного релиза с треками базы.
 
     Сначала по номеру дорожки в имени файла ("01. Песня"), затем по
     нормализованному названию (без версии в скобках и без префикса номера).
     Файл засчитывается после проверки качества.
+
+    return_verified=True: возвращает {spotify_id: (path, verified)} — без
+    повторной проверки файла в вызывающем коде.
     """
     policy = policy or QualityPolicy()
     files = [
@@ -178,8 +189,9 @@ def match_files_to_tracks(
             if p and p not in used:
                 cand_files = [p]
         for p in cand_files:
-            if verify_file(p, track, policy):
-                result[track.spotify_id] = p
+            verified = verify_file(p, track, policy)
+            if verified:
+                result[track.spotify_id] = (p, verified) if return_verified else p
                 used.add(p)
                 break
     return result
